@@ -1649,6 +1649,19 @@ TX0 = ${TX0D}/tx0_cpu.c ${TX0D}/tx0_dpy.c ${TX0D}/tx0_stddev.c \
 	${TX0D}/tx0_sys.c ${TX0D}/tx0_sys_orig.c ${DISPLAYL}
 TX0_OPT = -I ${TX0D} $(DISPLAY_OPT)
 
+SEL32D = SEL32
+SEL32 = ${SEL32D}/sel32_cpu.c ${SEL32D}/sel32_sys.c \
+	${SEL32D}/sel32_chan.c \
+	${SEL32D}/sel32_iop.c \
+	${SEL32D}/sel32_com.c \
+	${SEL32D}/sel32_con.c \
+	${SEL32D}/sel32_clk.c \
+	${SEL32D}/sel32_mt.c \
+	${SEL32D}/sel32_lpr.c \
+	${SEL32D}/sel32_scfi.c \
+	${SEL32D}/sel32_fltpt.c \
+	${SEL32D}/sel32_disk.c
+SEL32_OPT = -I $(SEL32D) -DSEL32 -DUSE_SIM_CARD #-Wall
 
 SSEMD = SSEM
 SSEM = ${SSEMD}/ssem_cpu.c ${SSEMD}/ssem_sys.c
@@ -1795,7 +1808,7 @@ ALL = pdp1 pdp4 pdp7 pdp8 pdp9 pdp15 pdp11 pdp10 \
 	i7094 ibm1130 id16 id32 sds lgp h316 cdc1700 \
 	swtp6800mp-a swtp6800mp-a2 tx-0 ssem b5500 isys8010 isys8020 \
 	isys8030 isys8024 imds-225 scelbi 3b2 i701 i704 i7010 i7070 i7080 i7090 \
-	sigma uc15
+	sigma uc15 sel32
 
 all : ${ALL}
 
@@ -2242,6 +2255,15 @@ ${BIN}ibmpcxt${EXE} : ${IBMPCXT} ${SIM} ${BUILD_ROMS}
 	${CC} ${IBMPCXT} ${SIM} ${IBMPCXT_OPT} $(CC_OUTSPEC) ${LDFLAGS}
 ifneq (,$(call find_test,${IBMPCXTD},ibmpcxt))
 	$@ $(call find_test,${IBMPCXTD},ibmpcxt) $(TEST_ARG)
+endif
+
+sel32: $(BIN)sel32$(EXE)
+
+${BIN}sel32${EXE}: ${SEL32} ${SIM}
+	${MKDIRBIN}
+	${CC} ${SEL32} ${SIM} ${SEL32_OPT} $(CC_OUTSPEC) ${LDFLAGS}
+ifneq (,$(call find_test,${SEL32D},sel32))
+	$@ $(call find_test,${SEL32D},sel32) $(TEST_ARG)
 endif
 
 scelbi: ${BIN}scelbi${EXE}
