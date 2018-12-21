@@ -788,7 +788,7 @@ t_stat mt_srv(UNIT * uptr)
         if (chan_write_byte(addr, &ch)) {
             sim_debug(DEBUG_CMD, &mta_dev, "Read unit %d EOR\n", unit);
             /* If not read whole record, skip till end */
-            if (uptr->u4 < uptr->hwmark) {
+            if ((uint32)uptr->u4 < uptr->hwmark) {
                 /* Send dummy character to force SLI */
                 chan_write_byte(addr, &ch);         /* write the byte */
                 sim_debug(DEBUG_CMD, &mta_dev, "Read unit %d send dump SLI\n", unit);
@@ -804,7 +804,7 @@ t_stat mt_srv(UNIT * uptr)
         } else {
             sim_debug(DEBUG_DATA, &mta_dev,
                 "Read data @2 unit %d  cnt %x ch %02x hwm %x\n", unit, uptr->u4, ch, uptr->hwmark);
-            if (uptr->u4 >= uptr->hwmark) {         /* In IRG */
+            if ((uint32)uptr->u4 >= uptr->hwmark) {         /* In IRG */
                 /* Handle end of record */
                 uptr->u3 &= ~MT_CMDMSK;             /* clear the cmd */
                 mt_busy[bufnum] &= ~1;              /* set not busy */

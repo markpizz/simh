@@ -205,8 +205,8 @@ struct InstHistory
     uint32   inst;      /* the instruction itself */
     uint32   ea;        /* computed effective address of data */
     uint32   reg;       /* reg for operation */
-    uint32   dest;      /* destination value */
-    uint32   src;       /* source value */
+    t_uint64 dest;      /* destination value */
+    t_uint64 src;       /* source value */
     uint8    cc;        /* cc's */
 };
 
@@ -239,8 +239,8 @@ extern uint32 scan_chan(void);              /* go scan for I/O int pending */
 extern uint16 loading;                      /* set when doing IPL */
 extern int fprint_inst(FILE *of, uint32 val, int32 sw); /* instruction print function */
 extern int irq_pend;                        /* go scan for pending interrupt */
-extern void rtc_setup(int ss, uint32 level);    /* tell rtc to start/stop */
-extern void itm_setup(int ss, uint32 level);    /* tell itm to start/stop */
+extern void rtc_setup(uint32 ss, uint32 level);    /* tell rtc to start/stop */
+extern void itm_setup(uint32 ss, uint32 level);    /* tell itm to start/stop */
 extern int32 itm_rdwr(uint32 cmd, int32 cnt, uint32 level); /* read/write the interval timer */
 extern int32 itm_srv(UNIT *uptr);           /* read/write the interval timer */
 extern UNIT itm_unit;                       /* fake interval timer */
@@ -1127,7 +1127,7 @@ t_stat sim_instr(void) {
     uint8               EXM_EXR=0;        /* PC Increment for EXM/EXR instructions */
     int                 reg;              /* GPR or Base register bits 6-8 */
     int                 sreg;             /* Source reg in from bits 9-11 reg-reg instructions */
-    int                 ix;               /* index register */
+    uint32              ix;               /* index register */
     int                 dbl;              /* Double word */
     int                 ovr;              /* Overflow flag */
     int                 stopnext = 0;     /* Stop on next instruction */
@@ -1586,14 +1586,13 @@ exec:
                         return STOP_HALT;           /* exit to simh for halt */
                         break;
                 case 0x1:   /* WAIT */
-                        if (modes & PRIVBIT == 0) { /* must be privileged to wait */
+                        if ((modes & PRIVBIT) == 0) { /* must be privileged to wait */
                             TRAPME = PRIVVIOL_TRAP; /* set the trap to take */
                             goto newpsd;            /* Privlege violation trap */
                         }
                         if (wait4int == 0) {
                             time_t result = time(NULL);
-//                          fprintf(stderr, "Starting WAIT mode @%ju\r\n", (intmax_t)result);
-                            sim_debug(DEBUG_CMD, &cpu_dev, "Starting WAIT mode %ju\n", (intmax_t)result);
+                            sim_debug(DEBUG_CMD, &cpu_dev, "Starting WAIT mode %u\n", (uint32)result);
                         }
                         wait4int = 1;               /* show we are waiting for interrupt */
                         i_flags |= BT;              /* keep PC from being incremented while waiting */
@@ -1988,7 +1987,7 @@ tbr:                                            /* handle basemode TBR too */
                     break;
 
                 case 0x4:           /* TRN */       /* Transfer register negative */
-                    temp = -addr;                   /* negate Rs value */
+                    temp = NEGATE32(addr);          /* negate Rs value */
                     if (temp == addr)               /* overflow if nothing changed */
                         ovr = 1;                    /* set overflow flag */
                     bc = 1;                         /* set the CC's */
@@ -2042,7 +2041,7 @@ tbr:                                            /* handle basemode TBR too */
                     break;
 
                 case 0xC:           /* TRNM */      /* Transfer register negative masked */
-                    temp = -addr;                   /* complement GPR[reg] */
+                    temp = NEGATE32(addr);          /* complement GPR[reg] */
                     if (temp == addr)               /* check for overflow */
                         ovr = 1;                    /* overflow */
                     temp &= GPR[4];                 /* and with negative reg */
@@ -2118,7 +2117,7 @@ tbr:                                            /* handle basemode TBR too */
                         addr = GPR[sreg];               /* reg contents specified by Rs */
                         /* temp has Rd (GPR[reg]), addr has Rs (GPR[sreg]) */
                         if ((opr & 0xF) == 0x3)
-                            addr = -addr;               /* subtract, so negate source */
+                            addr = NEGATE32(addr);      /* subtract, so negate source */
                         temp2 = s_adfw(temp, addr, &CC);    /* all add float numbers */
                         PSD1 &= 0x87FFFFFE;             /* clear the old CC's */
                         PSD1 |= (CC & 0x78000000);      /* update the CC's in the PSD */
@@ -2160,7 +2159,7 @@ tbr:                                            /* handle basemode TBR too */
                         temp = GPR[reg];                /* reg contents specified by Rd */
                         addr = GPR[sreg];               /* reg contents specified by Rs */
                         /* temp has Rd (GPR[reg]), addr has Rs (GPR[sreg]) */
-                        temp2 = s_dvfw(temp, addr, &CC);    /* divide reg by sreg */
+                        temp2 = (uint32)s_dvfw(temp, addr, &CC);    /* divide reg by sreg */
                         PSD1 &= 0x87FFFFFE;             /* clear the old CC's */
                         PSD1 |= (CC & 0x78000000);      /* update the CC's in the PSD */
                         if (CC & CC1BIT) {              /* check for arithmetic exception */
@@ -2292,7 +2291,7 @@ tbr:                                            /* handle basemode TBR too */
                         td = (t_int64)dest % (t_int64)source;   /* remainder */
                         dbl = (td < 0);                 /* double reg is neg remainder */
                         if (((td & DMSIGN) ^ (dest & DMSIGN)) != 0) /* Fix sign if needed */
-                            td = -td;                   /* dividend and remainder must be same sign */
+                            td = NEGATE32(td);          /* dividend and remainder must be same sign */
                         dest = (t_int64)dest / (t_int64)source; /* now do the divide */
                         /* test for overflow */
                         if ((dest & D32LMASK) != 0 && (dest & D32LMASK) != D32LMASK) {
@@ -2425,7 +2424,7 @@ doovr4:
 
             case 0x3C>>2:               /* 0x3C HLF - HLF */    /* SUR and SURM */
                 temp = GPR[reg];                        /* get negative value to add */
-                addr = -GPR[sreg];                      /* reg contents specified by Rs */
+                addr = NEGATE32(GPR[sreg]);             /* reg contents specified by Rs */
                 switch(opr & 0xF) {
                     case 0x0:       /* SUR */
                         t = (temp & FSIGN) != 0;        /* set flag for sign bit not set in temp value */
@@ -2496,7 +2495,7 @@ doovr4:
                 td = (t_int64)dest % (t_int64)source;   /* remainder */
                 dbl = (td < 0);                         /* double reg is neg remainder */
                 if (((td & DMSIGN) ^ (dest & DMSIGN)) != 0) /* Fix sign if needed */
-                    td = -td;                           /* dividend and remainder must be same sign */
+                    td = NEGATE32(td);                  /* dividend and remainder must be same sign */
                 dest = (t_int64)dest / (t_int64)source; /* now do the divide */
                 if ((dest & D32LMASK) != 0 && (dest & D32LMASK) != D32LMASK) {  /* test for overflow */
 doovr3:
@@ -2561,7 +2560,7 @@ doovr3:
                     goto newpsd;                        /* go execute the trap now */
                 }
                 if ((FC & 0x4) != 0x4) {                /* this is a LWBR instruction */
-                    BR[reg] = source;                   /* load memory location in BR */
+                    BR[reg] = (uint32)source;           /* load memory location in BR */
                 } else {                                /* this is a CALLM/BSUBM instruction */
                     /* if Rd field is 0 (reg is b6-8), this is a BSUBM instruction */
                     /* otherwise it is a CALLM instruction (Rd != 0) */
@@ -2790,7 +2789,7 @@ src:
 
         case 0x8C>>2:               /* 0x8C  SCC|SD|RR|RNX|ADR - SD|RNX|ADR */ /* EOMx */
                 /* must special handle because we are getting bit difference */
-				/* for word, halfword, & byte zero the upper 32 bits of dest */
+                /* for word, halfword, & byte zero the upper 32 bits of dest */
                 td = dest ^ source;                 /* DO EOMX */
 meoa:
                 switch(FC) {                        /* adjust for hw or bytes */
@@ -2808,7 +2807,7 @@ meoa:
                 case 0:                             /* 32 bit word */
                     /* EOMW */
                     td &= D32RMASK;                 /* mask out right most 32 bits */
-                    /* drop through */					
+                    /* drop through */
                 case 2:                             /* 64 bit double */
                     /* EOMD */
                     dest = 0;                       /* make place for 64 bits */
@@ -2982,7 +2981,7 @@ fprintf(stderr, "\r\n");
                 break;
  
         case 0xB4>>2:               /* 0xB4 SCC|SD|RM|ADR - SD|RM|ADR */ /* LNx */
-                dest = -source;     /* set the value to load into reg */
+                dest = NEGATE32(source);/* set the value to load into reg */
                 if (dest == source)
                     ovr = 1;    /* set arithmetic exception status */
                 /* the arithmetic exception will be handled */
@@ -2994,7 +2993,7 @@ fprintf(stderr, "\r\n");
                 break;
 
         case 0xBC>>2:           /* 0xBC SCC|SD|RR|RM|ADR - SD|RM|ADR */ /* SUMx */
-                source = -source;
+                source = NEGATE32(source);
                 /* Fall through */
 
         case 0xE8>>2:           /* 0xE8 SCC|SM|RR|RM|ADR - SM|RM|ADR */ /* ARMx */
@@ -3043,7 +3042,7 @@ fprintf(stderr, "\r\n");
                 td = ((t_int64)dest % (t_int64)source); /* remainder */
                 dbl = (td < 0);                 /* double reg if neg remainder */
                 if (((td & DMSIGN) ^ (dest & DMSIGN)) != 0) /* Fix sign if needed */
-                    td = -td;                       /* dividend and remainder must be same sign */
+                    td = NEGATE32(td);          /* dividend and remainder must be same sign */
                 dest = (t_int64)dest / (t_int64)source; /* now do the divide */
                 if ((dest & D32LMASK) != 0 && (dest & D32LMASK) != D32LMASK) {  /* test for overflow */
 doovr:
@@ -3075,7 +3074,7 @@ doovr:
                     break;
 
                 case 0x2:       /* SUI */
-                    addr = -addr;               /* just make value a negative add */
+                    addr = NEGATE32(addr);      /* just make value a negative add */
                     /* drop through */
                 case 0x1:       /* ADI */
                     t = (temp & FSIGN) != 0;    /* set flag for sign bit not set in reg value */
@@ -3125,7 +3124,7 @@ doovr:
                     td = ((t_int64)dest % (t_int64)source); /* remainder */
                     dbl = (td < 0);                 /* double reg if neg remainder */
                     if (((td & DMSIGN) ^ (dest & DMSIGN)) != 0) /* Fix sign if needed */
-                        td = -td;                       /* dividend and remainder must be same sign */
+                        td = NEGATE32(td);          /* dividend and remainder must be same sign */
                     dest = (t_int64)dest / (t_int64)source; /* now do the divide */
                     if ((dest & D32LMASK) != 0 && (dest & D32LMASK) != D32LMASK) {  /* test for overflow */
 doovr2:
@@ -3457,7 +3456,7 @@ if (CPU_MODEL < MODEL_27) {
                     if ((opr & 0xf) == 0x8) {           /* Was it MPFW? */
                         temp = s_mpfw(temp2, addr, &CC);    /* do MPFW */
                     } else {
-                        temp = s_dvfw(temp2, addr, &CC);    /* do DVFW */
+                        temp = (uint32)s_dvfw(temp2, addr, &CC);    /* do DVFW */
                     }
                     if (CC & CC1BIT)
                         ovr = 1;
@@ -3566,7 +3565,7 @@ if (CPU_MODEL < MODEL_27) {
                 break;
 
         case 0xF4>>2:               /* 0xF4 RR|SD|ADR - RR|SB|WRD */ /* Branch increment */
-                dest += 1 << ((IR >> 21) & 3);          /* use bits 9 & 10 to incr reg */
+                dest += ((t_uint64)1) << ((IR >> 21) & 3);/* use bits 9 & 10 to incr reg */
                 if (dest != 0) {                        /* if reg is not 0, take the branch */
                     /* we are taking the branch, set CC's if indirect, else leave'm */
                     /* update the PSD with new address */
@@ -4425,7 +4424,6 @@ t_stat cpu_reset(DEVICE * dptr)
 /* address is byte address with bits 30,31 = 0 */
 t_stat cpu_ex(t_value *vptr, t_addr baddr, UNIT *uptr, int32 sw)
 {
-    uint32 temp, t;
     uint32 addr = (baddr & 0xfffffc) >> 2;  /* make 24 bit byte address into word address */
 
     /* MSIZE is in 32 bit words */
@@ -4530,7 +4528,7 @@ t_stat cpu_show_hist(FILE * st, UNIT * uptr, int32 val, CONST void *desc)
     for (k = 0; k < lnt; k++) {         /* print specified entries */
         h = &hst[(++di) % hst_lnt];     /* entry pointer */
         /* display the instruction and results */
-        fprintf(st, "%08x %08x %08x %08x %08x %1x",
+        fprintf(st, "%08x %08x %08x %08" LL_FMT "x %08" LL_FMT "x %1x",
             h->psd1, h->psd2, h->inst, h->dest, h->src, h->cc); 
             fputc('\n', st);    /* end line */
     }                           /* end for */

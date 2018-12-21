@@ -366,7 +366,7 @@ t_stat load_icl(FILE *fileref)
     uint32  data;       /* entry data */
     uint32  cls;        /* device class */
     uint32  ivl;        /* Interrupt Vector Location */
-    int     i;          /* just a tmp */
+    uint32  i;          /* just a tmp */
     char    buf[120];   /* input buffer */
 
     /* read file input records until the end */
@@ -577,10 +577,10 @@ t_stat sim_load (FILE *fileref, CONST char *cptr, CONST char *fnam, int flag)
 #define X               0x80    /* 32/55 or 32/75 only */
 
 typedef struct _opcode {
-       uint16   opbase;
-       uint16   mask;
-       uint8    type;
-       char     *name;
+       uint16       opbase;
+       uint16       mask;
+       uint8        type;
+       const char   *name;
 } t_opcode;
 
 
@@ -794,7 +794,7 @@ t_opcode  optab[] = {
     val       =       16/32 bit instruction to print left justified
     sw        =       mode switches, 'M'=base mode, 'N'=nonbase mode
 */
-char *fc_type = "WHDHBBBB";     /* F & C bit values */
+const char *fc_type = "WHDHBBBB";   /* F & C bit values */
 
 int fprint_inst(FILE *of, uint32 val, int32 sw)
 {

@@ -78,7 +78,7 @@
 /* Bits 16-23 - Channel address (0-127) */
 /* Bits 24-31 - Device Sub address (0-255) */
 
-int     channels        = MAX_CHAN;         /* maximum number of channels */
+uint32  channels        = MAX_CHAN;         /* maximum number of channels */
 int     subchannels     = SUB_CHANS;        /* maximum number of subchannel devices */
 int     irq_pend        = 0;                /* pending interrupt flag */
 
@@ -855,7 +855,6 @@ t_stat testxio(uint16 lchsa, uint32 *status) {        /* test XIO */
     UNIT    *uptr;
     uint32  chan_ivl;                               /* Interrupt Level ICB address for channel */
     uint32  iocla;                                  /* I/O channel IOCL address int ICB */
-    uint32  stata;                                  /* I/O channel status location in ICB */
     uint32  tempa, inta, spadent;
     uint16  chsa;                                   /* chan/subaddr */
     CHANP   *chp, *pchp;                            /* Channel prog pointers */
@@ -1169,7 +1168,6 @@ t_stat chan_boot(uint16 chsa, DEVICE *dptr) {
     int     chan = get_chan(chsa);
     DIB     *dibp = dev_unit[chsa];
     CHANP   *chp = dibp->chan_prg;
-    int     i,j;
 
     sim_debug(DEBUG_EXP, &cpu_dev, "Channel Boot chan/device addr %x\n", chsa);
     if (dibp == 0)                                  /* if no channel or device, error */
@@ -1341,7 +1339,7 @@ uint32 scan_chan(void) {
 /* set up the devices configured into the simulator */
 /* only devices with a DIB will be processed */
 t_stat chan_set_devs() {
-    int i, j;
+    uint32 i, j;
 
     for(i = 0; i < MAX_DEV; i++) {
         dev_unit[i] = NULL;                         /* clear Device pointer array */

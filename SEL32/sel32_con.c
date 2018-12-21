@@ -255,7 +255,7 @@ t_stat con_srvo(UNIT *uptr) {
             uptr->u3 &= LMASK;              /* nothing left, command complete */
             chan_end(chsa, SNS_CHNEND|SNS_DEVEND);  /* done */
         } else {
-            sim_debug(DEBUG_CMD, &con_dev, "con_srvo write %d: putch %0.2x %c\n", unit, ch, ch);
+            sim_debug(DEBUG_CMD, &con_dev, "con_srvo write %d: putch %02x %c\n", unit, ch, ch);
             sim_putchar(ch);            /* output next char to device */
             sim_activate(uptr, 20);     /* TRY 07-18-18 */
         }

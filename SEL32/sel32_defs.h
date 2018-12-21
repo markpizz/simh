@@ -250,6 +250,7 @@ extern DEBTAB dev_debug[];
 #define DSEXT16(x)      (x&0x8000?(l_uint64)(((l_uint64)x&RMASK)|D48LMASK):(t_uint64)x)
 /* sign extend 32 bit value to uint64 */
 #define DSEXT32(x)      (x&0x8000?(l_uint64)(((l_uint64)x&D32RMASK)|D32LMASK):(t_uint64)x)
+#define NEGATE32(val) ((~val) + 1)
 
 #define UNIT_V_MODEL    (UNIT_V_UF + 0)
 #define UNIT_MODEL      (7 << UNIT_V_MODEL)

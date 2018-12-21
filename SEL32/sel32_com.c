@@ -637,7 +637,6 @@ t_stat comi_srv(UNIT *uptr)
     uint16  chsa = GET_UADDR(uptr->u3);                 /* get channel/sub-addr */
     int     cmd = uptr->u3 & 0xff;
     uint32  cln = (uptr - coml_unit) & 0x7;             /* use line # 0-7 for 8-15 */
-    UNIT    *comlp;
 
     ln = uptr - com_unit;                               /* line # */
     if ((com_unit[COMC].flags & UNIT_ATT) == 0){        /* attached? */
