@@ -484,10 +484,10 @@ DEVICE cpu_dev = {
     cpu_mod,             /* MTAB *modifiers */        /* modifier array */
     1,                   /* uint32 numunits */        /* number of units */
     16,                  /* uint32 aradix */          /* address radix */
-    24,                  /* uint32 awidth */          /* address width */
-    2,                   /* uint32 aincr */           /* address increment */
+    32,                  /* uint32 awidth */          /* address width */
+    1,                   /* uint32 aincr */           /* address increment */
     16,                  /* uint32 dradix */          /* data radix */
-    32,                  /* uint32 dwidth */          /* data width */
+    8,                   /* uint32 dwidth */          /* data width */
     &cpu_ex,             /* t_stat (*examine) */      /* examine routine */
     &cpu_dep,            /* t_stat (*deposit) */      /* deposit routine */
     &cpu_reset,          /* t_stat (*reset) */        /* reset routine */
@@ -4420,8 +4420,7 @@ t_stat cpu_reset(DEVICE * dptr)
 }
 
 /* Memory examine */
-/* examine a 32bit memory location */
-/* address is byte address with bits 30,31 = 0 */
+/* examine a 32bit memory location and return a byte */
 t_stat cpu_ex(t_value *vptr, t_addr baddr, UNIT *uptr, int32 sw)
 {
     uint32 addr = (baddr & 0xfffffc) >> 2;  /* make 24 bit byte address into word address */
@@ -4431,21 +4430,22 @@ t_stat cpu_ex(t_value *vptr, t_addr baddr, UNIT *uptr, int32 sw)
         return SCPE_NXM;    /* no, none existant memory error */
     if (vptr == NULL)       /* any address specified by user */
         return SCPE_OK;     /* no, just ignore the request */
-    *vptr = M[addr];        /* return memory contents */
+    *vptr = (M[addr] >> (8 * (3 - (baddr & 0x3))));  /* return memory contents */
     return SCPE_OK;         /* we are all ok */
 }
 
 /* Memory deposit */
-/* modify a 32bit memory location */
+/* modify a byte specified by a 32bit memory location */
 /* address is byte address with bits 30,31 = 0 */
 t_stat cpu_dep(t_value val, t_addr baddr, UNIT *uptr, int32 sw)
 {
     uint32 addr = (baddr & 0xfffffc) >> 2;  /* make 24 bit byte address into word address */
+    static const uint32 bmasks[4] = {0x00FFFFFF, 0xFF00FFFF, 0xFFFF00FF, 0xFFFFFF00};
 
     /* MSIZE is in 32 bit words */
     if (addr >= MEMSIZE)    /* see if address is within our memory */
         return SCPE_NXM;    /* no, none existant memory error */
-    M[addr] = val;          /* set the new data value */
+    M[addr] = (M[addr] & bmasks[baddr & 0x3]) | (val << (8 * (3 - (baddr & 0x3))));
     return SCPE_OK;         /* all OK */
 }
 

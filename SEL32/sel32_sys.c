@@ -55,7 +55,7 @@ extern uint32 PSD[];
 char sim_name[] = "SEL 32";                 /* our simulator name */
 
 REG *sim_PC = &cpu_reg[0];
-int32 sim_emax = 1;                         /* maximum number of instructions/words to examine */
+int32 sim_emax = 4;                         /* maximum number of instructions/words to examine */
 
 DEVICE *sim_devices[] = {
         &cpu_dev,
@@ -1578,7 +1578,7 @@ t_stat parse_sym (CONST char *cptr, t_addr addr, UNIT *uptr, t_value *val, int32
     /* this code will get a value based on length specified in switches */
     num = get_uint(cptr, rdx, max[l], &r);          /* get the unsigned value */
     for (i = 0; i < l && i < 4; i++) 
-        val[i] = (num >> (i * 8)) & 0xff;           /* get 1-4 bytes of data */
+        val[i] = (num >> ((l - (1 + i)) * 8)) & 0xff; /* get 1-4 bytes of data */
     return -(l-1);
 }
 
