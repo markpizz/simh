@@ -349,3 +349,7 @@ extern DEBTAB dev_debug[];
 #define INTS_EXTL   0x08000000          /* IOP/RTOM ext interrupt if set, I/O if not set (copy of SPAD) */
 #define INTS_REQ    0x04000000          /* Interrupt is requesting */
 
+/* Rename of global PC variable to avoid namespace conflicts on some platforms */
+
+#define PC PC_Global
+
