@@ -82,8 +82,6 @@ uint32  channels        = MAX_CHAN;         /* maximum number of channels */
 int     subchannels     = SUB_CHANS;        /* maximum number of subchannel devices */
 int     irq_pend        = 0;                /* pending interrupt flag */
 
-#define AMASK            0x00ffffff         /* 24 bit mask */
-
 extern uint32   M[];                        /* our memory */
 extern uint32   SPAD[];                     /* CPU scratchpad memory */
 extern uint32   CPUSTATUS;                  /* CPU status word */
@@ -291,7 +289,7 @@ CHANP *find_chanp_ptr(uint16 chsa)
  */
 int readfull(CHANP *chp, uint32 maddr, uint32 *word)
 {
-    maddr &= AMASK;                             /* mask addr to 24 bits */
+    maddr &= MASK24;                            /* mask addr to 24 bits */
     if (maddr > MEMSIZE) {                      /* see if mem addr > MEMSIZE */
         chp->chan_status |= STATUS_PCHK;        /* program check error */
         return 1;                               /* show we have error */
@@ -312,13 +310,13 @@ int readbuff(CHANP *chp)
     uint32 addr = chp->ccw_addr;                /* channel buffer address */
     uint16 chan = get_chan(chp->chan_dev);      /* our channel */
 
-    if ((addr & AMASK) > MEMSIZE) {             /* see if memory address invalid */
+    if ((addr & MASK24) > MEMSIZE) {            /* see if memory address invalid */
         chp->chan_status |= STATUS_PCHK;        /* bad, program check */
         chp->chan_byte = BUFF_CHNEND;           /* force channel end */
         irq_pend = 1;                           /* and we have an interrupt */
         return 1;                               /* done, with error */
     }
-    addr &= AMASK;                              /* address only */
+    addr &= MASK24;                             /* address only */
     addr >>= 2;                                 /* byte to word address */
     chp->chan_buf = M[addr];                    /* get 4 bytes */
 
@@ -342,13 +340,13 @@ int writebuff(CHANP *chp)
 {
     uint32 addr = chp->ccw_addr;
 
-    if ((addr & AMASK) > MEMSIZE) {
+    if ((addr & MASK24) > MEMSIZE) {
         chp->chan_status |= STATUS_PCHK;
         chp->chan_byte = BUFF_CHNEND;
         irq_pend = 1;
         return 1;
     }
-    addr &= AMASK;
+    addr &= MASK24;
     M[addr>>2] = chp->chan_buf;
     return 0;
 }
@@ -388,7 +386,7 @@ loop:
     /* TIC can't follow TIC or be first in command chain */
     if (((word >> 24) & 0xf) == CMD_TIC) {
         if (tic_ok) {
-            chp->chan_caw = word & AMASK;           /* get new IOCD address */
+            chp->chan_caw = word & MASK24;          /* get new IOCD address */
             tic_ok = 0;                             /* another tic not allowed */
             goto loop;                              /* restart the IOCD processing */
         }
@@ -407,7 +405,7 @@ loop:
         docmd = 1;                                  /* show we have a command */
     }
     /* Set up for this command */
-    chp->ccw_addr = word & AMASK;                   /* set the data address */
+    chp->ccw_addr = word & MASK24;                  /* set the data address */
     readfull(chp, chp->chan_caw, &word);            /* get IOCD WD 2 */
 
     sim_debug(DEBUG_CMD, &cpu_dev, "load_ccw read ccw chan %02x caw %06x IOCD wd 2 %08x\n",

@@ -41,7 +41,7 @@ extern uint32   SPAD[];         /* cpu SPAD memory */
 
 #define GET_TYPE(x)        ((UNIT_TYPE & (x)) >> UNIT_V_TYPE)
 #define SET_TYPE(x)         (UNIT_TYPE & ((x) << UNIT_V_TYPE))
-#define UNIT_DISK          UNIT_ATTABLE | UNIT_DISABLE | UNIT_ROABLE | UNIT_FIX
+#define UNIT_DISK          UNIT_ATTABLE | UNIT_DISABLE | UNIT_ROABLE | UNIT_FIX | UNIT_IDLE
 
 /* INCH command information */
 /*

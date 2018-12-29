@@ -66,7 +66,7 @@ int32 rtc_lvl = 0x18;               /* rtc interrupt level */
 */
 
 /* clock is attached all the time */
-/* defailt to 60 HZ RTC */
+/* default to 60 HZ RTC */
 UNIT rtc_unit = { UDATA (&rtc_srv, UNIT_ATT, 0), 16666, UNIT_ADDR(0x7F06)};
 
 REG rtc_reg[] = {
@@ -110,7 +110,7 @@ t_stat rtc_srv (UNIT *uptr)
         irq_pend = 1;                               /* make sure we scan for int */
     }
     rtc_unit.wait = sim_rtcn_calb (rtc_tps, TMR_RTC);   /* calibrate */
-    sim_activate_after (&rtc_unit, 1000000/rtc_tps);/* reactivate */
+    sim_activate_after (&rtc_unit, 1000000/rtc_tps);/* reactivate 16666 tics / sec */
     return SCPE_OK;
 }
 
@@ -196,9 +196,9 @@ REG itm_reg[] = {
     };
 
 MTAB itm_mod[] = {
-    { MTAB_XTD|MTAB_VDV, 3840, NULL, "38.4us",
+    { MTAB_XTD|MTAB_VDV, 3840, NULL, "38.40us",
       &itm_set_freq, NULL, NULL },
-    { MTAB_XTD|MTAB_VDV, 7686, NULL, "76.86us",
+    { MTAB_XTD|MTAB_VDV, 7680, NULL, "76.80us",
       &itm_set_freq, NULL, NULL },
     { MTAB_XTD|MTAB_VDV, 0, "FREQUENCY", NULL,
       NULL, &itm_show_freq, NULL },
@@ -310,7 +310,7 @@ t_stat itm_set_freq (UNIT *uptr, int32 val, CONST char *cptr, void *desc)
 {
     if (cptr)                                       /* if chars, bad */
         return SCPE_ARG;                            /* ARG error */
-    if ((val != 3840) && (val != 7686))
+    if ((val != 3840) && (val != 7680))
         return SCPE_IERR;                           /* scope error */
     itm_tick_size_x_100 = val;                      /* set the new frequency */
     return SCPE_OK;                                 /* we done */
