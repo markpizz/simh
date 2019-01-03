@@ -270,7 +270,6 @@ t_stat con_srvi(UNIT *uptr) {
     int         cmd = uptr->u3 & CON_MSK;
     t_stat      r = SCPE_ARG;                   /* Force error if not set */
     uint8       ch;
-    int         i;
 
     switch (cmd) {
 

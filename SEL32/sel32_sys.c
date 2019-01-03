@@ -1028,7 +1028,6 @@ t_stat fprint_sym (FILE *of, t_addr addr, t_value *val, UNIT *uptr, int32 sw)
     } else
     /* go print the symbolic instruction for base or nonbase mode */
     if (sw & (SWMASK('M') | SWMASK('N'))) { 
-        unsigned char ch;
         num = 0;
         for (i = 0; i < l && i < 4; i++) {
             num |= (uint32)val[i] << ((l-i-1) * 8); /* collect 8-32 bit data value to print */
