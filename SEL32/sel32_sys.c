@@ -1044,8 +1044,6 @@ t_stat fprint_sym (FILE *of, t_addr addr, t_value *val, UNIT *uptr, int32 sw)
     } else {
         /* print the numeric value of the memory data */
         num = 0;
-        if (addr & 0x02)
-            l = 2;
         for (i = 0; i < l && i < 4; i++) 
             num |= (uint32)val[i] << ((l-i-1) * 8); /* collect 8-32 bit data value to print */
 //printf("call pr_val addr %x inst %x sw %x num %x\r\n", addr, tmp, sw, num);
