@@ -1477,9 +1477,9 @@ exec:
                             time_t result = time(NULL);
                             sim_debug(DEBUG_CMD, &cpu_dev, "Starting WAIT mode %u\n", (uint32)result);
                         }
-                        /* tell simh we will be waiting */
-                        sim_idle(TMR_RTC, 1);       /* wait for clock tick */
                         wait4int = 1;               /* show we are waiting for interrupt */
+                        /* tell simh we will be waiting */
+                        sim_idle(TMR_RTC, 0);       /* wait for next pending device event */
                         i_flags |= BT;              /* keep PC from being incremented while waiting */
                         break;
                 case 0x2:   /* NOP */
