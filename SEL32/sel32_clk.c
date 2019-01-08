@@ -67,7 +67,7 @@ int32 rtc_lvl = 0x18;               /* rtc interrupt level */
 
 /* clock is attached all the time */
 /* default to 60 HZ RTC */
-UNIT rtc_unit = { UDATA (&rtc_srv, UNIT_ATT, 0), 16666, UNIT_ADDR(0x7F06)};
+UNIT rtc_unit = { UDATA (&rtc_srv, UNIT_ATT|UNIT_IDLE, 0), 16666, UNIT_ADDR(0x7F06)};
 
 REG rtc_reg[] = {
     { FLDATA (PIE, rtc_pie, 0) },

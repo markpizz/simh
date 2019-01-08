@@ -34,6 +34,7 @@
 */
 
 #include "sel32_defs.h"
+#include "sim_tmxr.h"
 
 #ifdef NUM_DEVS_CON
 
@@ -103,9 +104,8 @@ uint8 con_startcmd(UNIT *, uint16,  uint8);
 void    con_ini(UNIT *, t_bool);
 t_stat  con_srvi(UNIT *);
 t_stat  con_srvo(UNIT *);
+t_stat  con_poll(UNIT *);
 t_stat  con_reset(DEVICE *);
-t_stat  con_attach(UNIT *, char *);
-t_stat  con_detach(UNIT *);
 
 /* channel program information */
 CHANP           con_chp[NUM_UNITS_CON] = {0};
@@ -116,8 +116,8 @@ MTAB    con_mod[] = {
 };
 
 UNIT            con_unit[] = {
-    {UDATA(con_srvi, UNIT_ATT|UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFC)},   /* Input */
-    {UDATA(con_srvo, UNIT_ATT|UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFD)},   /* Output */
+    {UDATA(con_srvi,  UNIT_ATT|UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFC)},   /* Input */
+    {UDATA(con_srvo,  UNIT_ATT|UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFD)},   /* Output */
 };
 
 //DIB               con_dib = {NULL, con_startcmd, NULL, NULL, NULL, con_ini, con_unit, con_chp, NUM_UNITS_CON, 0xf, 0x7e00, 0, 0, 0};
@@ -141,7 +141,7 @@ DIB             con_dib = {
 DEVICE  con_dev = {
     "CON", con_unit, NULL, con_mod,
     NUM_UNITS_CON, 8, 15, 1, 8, 8,
-    NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, NULL, &con_reset, NULL, NULL, NULL,
     &con_dib, DEV_UADDR|DEV_DISABLE|DEV_DEBUG, 0, dev_debug
 };
 
@@ -268,8 +268,8 @@ t_stat con_srvi(UNIT *uptr) {
     uint16      chsa = GET_UADDR(uptr->u3);
     int         unit = (uptr - con_unit);       /* unit 0 is read, unit 1 is write */
     int         cmd = uptr->u3 & CON_MSK;
-    t_stat      r = SCPE_ARG;                   /* Force error if not set */
     uint8       ch;
+    t_stat      r;
 
     switch (cmd) {
 
@@ -295,8 +295,8 @@ t_stat con_srvi(UNIT *uptr) {
         break;
     }
 
-    /* poll for next input if reading or @@A sequence */
-    r = sim_poll_kbd();                         /* poll for ready */
+    /* check for next input if reading or @@A sequence */
+    r = sim_poll_kbd();                         /* poll for a char */
     if (r & SCPE_KFLAG) {                       /* got a char */
         ch = r & 0377;                          /* drop any extra bits */
         if ((ch >= 'a') && (ch <= 'z'))
@@ -362,10 +362,14 @@ t_stat con_srvi(UNIT *uptr) {
             }
         }
     }
-    if ((cmd == CON_RD) || (cmd == CON_ECHO))   /* looking for input */
-        sim_activate(uptr, 200);                /* keep going */
-    else
-        sim_activate(uptr, 400);                /* keep going */
+    if ((r & SCPE_KFLAG) &&                     /* got something and */
+        ((cmd == CON_RD) || (cmd == CON_ECHO))) /* looking for input */
+        return sim_activate (uptr, 20);
+    return tmxr_clock_coschedule_tmr (uptr, TMR_RTC, 1);      /* come back soon */
+}
+
+t_stat  con_reset(DEVICE *dptr) {
+    tmxr_set_console_units (&con_unit[0], &con_unit[1]);
     return SCPE_OK;
 }
 
