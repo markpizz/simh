@@ -353,6 +353,8 @@ MTAB cpu_mod[] = {
     {UNIT_MSIZE, MEMAMOUNT(6),   "4M",   "4M", &cpu_set_size},
     {UNIT_MSIZE, MEMAMOUNT(7),   "8M",   "8M", &cpu_set_size},
     {UNIT_MSIZE, MEMAMOUNT(8),  "16M",  "16M", &cpu_set_size},
+    { MTAB_XTD|MTAB_VDV, 0, "IDLE", "IDLE", &sim_set_idle, &sim_show_idle },
+    { MTAB_XTD|MTAB_VDV, 0, NULL, "NOIDLE", &sim_clr_idle, NULL },
     {MTAB_XTD | MTAB_VDV | MTAB_NMO | MTAB_SHP, 0, "HISTORY", "HISTORY",
      &cpu_set_hist, &cpu_show_hist},
     {0}
