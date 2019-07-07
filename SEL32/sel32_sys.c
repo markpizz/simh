@@ -695,7 +695,7 @@ t_opcode  optab[] = {
     {  0x7840,      0xFC40, N|H|TYPE_I,   "SLAD", },     /* Shift Left Arithmetic Double # NBR */
     {  0x7C00,      0xFC40, N|H|TYPE_I,   "SRLD", },     /* Shift Right Logical Double # NBR */
     {  0x7C40,      0xFC40, N|H|TYPE_I,   "SLLD", },     /* Shift Left Logical Double # NBR */
-    {  0x8000,      0xFC00,   TYPE_A,     "LEAR", },     /* Load Effective Address Real * */
+    {  0x8000,      0xFC08,   TYPE_A,     "LEAR", },     /* Load Effective Address Real * */
     {  0x8400,      0xFC00,   TYPE_A,     "ANM", },      /* And Memory B,H,W,D */
     {  0x8800,      0xFC00,   TYPE_A,     "ORM", },      /* Or Memory B,H,W,D */
     {  0x8C00,      0xFC00,   TYPE_A,     "EOM", },      /* Exclusive Or Memory */
