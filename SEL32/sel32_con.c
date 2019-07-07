@@ -116,8 +116,8 @@ MTAB    con_mod[] = {
 };
 
 UNIT            con_unit[] = {
-    {UDATA(con_srvi,  UNIT_ATT|UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFC)},   /* Input */
-    {UDATA(con_srvo,  UNIT_ATT|UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFD)},   /* Output */
+    {UDATA(con_srvi, UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFC)},   /* Input */
+    {UDATA(con_srvo, UNIT_IDLE, 0), 0, UNIT_ADDR(0x7EFD)},   /* Output */
 };
 
 //DIB               con_dib = {NULL, con_startcmd, NULL, NULL, NULL, con_ini, con_unit, con_chp, NUM_UNITS_CON, 0xf, 0x7e00, 0, 0, 0};
@@ -166,6 +166,7 @@ uint8  con_startcmd(UNIT *uptr, uint16 chan, uint8 cmd) {
     if ((uptr->u3 & CON_MSK) != 0)  /* is unit busy */
         return SNS_BSY;             /* yes, return busy */
 
+//fprintf(stderr, "COM process command %x\n", cmd);
     /* process the commands */
     switch (cmd & 0xFF) {
     case CON_INCH:      /* 0x00 */      /* INCH command */
@@ -187,8 +188,8 @@ uint8  con_startcmd(UNIT *uptr, uint16 chan, uint8 cmd) {
         return 0;                       /* no status change */
         break;
 
-    case CON_RD:                        /* Read command */
-    case CON_ECHO:                      /* Read command w/ECHO */
+    case CON_RD:        /* 0x02 */      /* Read command */
+    case CON_ECHO:      /* 0x0a */      /* Read command w/ECHO */
         /* if output requested for input device, give error */
         if (unit == 1) {
             uptr->u5 |= SNS_CMDREJ;     /* command rejected */
@@ -205,24 +206,24 @@ uint8  con_startcmd(UNIT *uptr, uint16 chan, uint8 cmd) {
         return 0;
         break;
 
-    case CON_NOP:                       /* NOP has do nothing */
+    case CON_NOP:       /* 0x03 */      /* NOP has do nothing */
         uptr->u5 = SNS_RDY|SNS_ONLN;    /* status is online & ready */
         return SNS_CHNEND|SNS_DEVEND;   /* good return */
         break;
 
-    case CON_CON:                       /* Connect, return Data Set ready */
+    case CON_CON:       /* 0x1f */      /* Connect, return Data Set ready */
         sim_debug(DEBUG_CMD, &con_dev, "con_startcmd %x: Cmd %x NOP\n", chan, cmd);
         uptr->u5 |= (SNS_DSR|SNS_DCD);  /* Data set ready, Data Carrier detected */
         return SNS_CHNEND|SNS_DEVEND;   /* good return */
         break;
 
-    case CON_DIS:                       /* NOP has do nothing */
+    case CON_DIS:       /* 0x23 */      /* NOP has do nothing */
         sim_debug(DEBUG_CMD, &con_dev, "con_startcmd %x: Cmd %x NOP\n", chan, cmd);
         uptr->u5 &= ~(SNS_DSR|SNS_DCD); /* Data set not ready */
         return SNS_CHNEND|SNS_DEVEND;   /* good return */
         break;
 
-    case CON_SNS:                       /* Sense */
+    case CON_SNS:       /* 0x04 */      /* Sense */
         sim_debug(DEBUG_CMD, &con_dev, "con_startcmd %x: Cmd Sense %02x\n", chan, uptr->u5);
         /* value 4 is Data Set Ready */
         /* value 5 is Data carrier detected n/u */
@@ -232,6 +233,7 @@ uint8  con_startcmd(UNIT *uptr, uint16 chan, uint8 cmd) {
         break;
 
     default:                            /* invalid command */
+//fprintf(stderr, "Invalid command %x\n", cmd);
         uptr->u5 |= SNS_CMDREJ;         /* command rejected */
         return SNS_CHNEND|SNS_DEVEND|SNS_UNITCHK;   /* unit check */
         break;
@@ -273,8 +275,8 @@ t_stat con_srvi(UNIT *uptr) {
 
     switch (cmd) {
 
-    case CON_RD:                                /* read from device */
-    case CON_ECHO:                              /* read from device w/ECHO */
+    case CON_RD:        /* 0x02 */              /* read from device */
+    case CON_ECHO:      /* 0x0a */              /* read from device w/ECHO */
         if (uptr->u3 & CON_INPUT) {             /* input waiting? */
             ch = con_data[unit].ibuff[uptr->u4++];  /* get char from read buffer */
             sim_debug(DEBUG_CMD, &con_dev, "con_srvi %d: read %02x\n", unit, ch);
