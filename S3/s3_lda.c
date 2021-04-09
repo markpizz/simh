@@ -66,7 +66,7 @@ int32 Cntl_Stor[2048];        /* Micro-Controller Control Storage */
 
 /* Local Display Adaptor */
 UNIT lda_unit = {
-     UDATA (&lda_svc, UNIT_FIX+UNIT_ATTABLE, 0), 40000 };
+     UDATA (&lda_svc, UNIT_ATTABLE, 0), 40000 };
 
 REG lda_reg[] = {
    { HRDATA (LSAR, LSAR, 16) },

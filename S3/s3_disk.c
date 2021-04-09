@@ -746,13 +746,13 @@ t_stat disk_tape2dsk (UNIT *uptr, CONST char **pcptr)
    if ((sim_switches & SWMASK ('T')) == 0)  /* Tape migrate option requested? */
       return SCPE_OK;
    memset(zeros, 0, sizeof(zeros));
-   cptr = get_glyph (cptr, gbuf, 0);        /* get tape spec */
+   cptr = get_glyph_quoted (cptr, gbuf, 0); /* get tape spec */
    sim_tape_set_fmt (uptr, 0, "aws", NULL); /* Default to aws tape format */
    sim_switches |= SWMASK ('E');            /* Tape image must exist */
    r = sim_tape_attach(uptr, gbuf);
    if (r != SCPE_OK)
       return sim_messagef (r, "Error opening tape image file: '%s'\n", gbuf);;
-   fdisk = fopen (cptr, "wb");
+   fdisk = sim_fopen (cptr, "wb");
    if (fdisk == NULL) {
       int saved_errno = errno;
       sim_tape_detach (uptr);
