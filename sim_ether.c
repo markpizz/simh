@@ -275,7 +275,7 @@
                   the registry on Windows XP x64
   10-Jul-06  RMS  Fixed linux conditionalization (from Chaskiel Grundman)
   02-Jun-06  JDB  Fixed compiler warning for incompatible sscanf parameter
-  15-Dec-05  DTH  Patched eth_host_devices [remove non-ethernet devices]
+  15-Dec-05  DTH  Patched eth_host_pcap_devices [remove non-ethernet devices]
                   (from Mark Pizzolato and Galen Tackett, 08-Jun-05)
                   Patched eth_open [tun fix](from Antal Ritter, 06-Oct-05)
   30-Nov-05  DTH  Added option to regenerate CRC on received packets; some
@@ -1015,6 +1015,15 @@ const char *eth_capabilities(void)
 
 #include <pcap.h>
 #include <string.h>
+#else
+struct pcap_pkthdr {
+    uint32 caplen;  /* length of portion present */
+    uint32 len;     /* length this packet (off wire) */
+};
+#define PCAP_ERRBUF_SIZE 256
+typedef void * pcap_t;  /* Pseudo Type to avoid compiler errors */
+#define DLT_EN10MB 1    /* Dummy Value to avoid compiler errors */
+#endif /* HAVE_PCAP_NETWORK */
 
 /*
      The libpcap provided API pcap_findalldevs() on most platforms, will 
@@ -1035,7 +1044,7 @@ const char *eth_capabilities(void)
      returned by pcap_findalldevs.
 
 */
-static int eth_host_devices(int used, int max, ETH_LIST* list)
+static int eth_host_pcap_devices(int used, int max, ETH_LIST* list)
 {
 pcap_t* conn = NULL;
 int i, j, datalink = 0;
@@ -1049,13 +1058,13 @@ for (i=0; i<used; ++i) {
   if (NULL != conn)
     datalink = pcap_datalink(conn), pcap_close(conn);
   list[i].eth_api = ETH_API_PCAP;
-#endif
   if ((NULL == conn) || (datalink != DLT_EN10MB)) {
     for (j=i; j<used-1; ++j)
       list[j] = list[j+1];
     --used;
     --i;
     }
+#endif
   } /* for */
 
 #if defined(_WIN32)
@@ -1099,6 +1108,49 @@ for (i=0; i<used; i++) {
   } /* for */
 #endif
 
+return used;
+}
+
+static int _eth_devices(int max, ETH_LIST* list)
+{
+int used = 0;
+char errbuf[PCAP_ERRBUF_SIZE] = "";
+#ifndef DONT_USE_PCAP_FINDALLDEVS
+pcap_if_t* alldevs;
+pcap_if_t* dev;
+
+memset(list, 0, max*sizeof(*list));
+errbuf[0] = '\0';
+/* retrieve the device list */
+if (pcap_findalldevs(&alldevs, errbuf) == -1) {
+  if (errbuf[0])
+    sim_printf ("Eth: %s\n", errbuf);
+  }
+else {
+  /* copy device list into the passed structure */
+  for (used=0, dev=alldevs; dev && (used < max); dev=dev->next, ++used) {
+    if ((dev->flags & PCAP_IF_LOOPBACK) || (!strcmp("any", dev->name)))
+      continue;
+    strlcpy(list[used].name, dev->name, sizeof(list[used].name));
+    if (dev->description)
+      strlcpy(list[used].desc, dev->description, sizeof(list[used].desc));
+    else
+      strlcpy(list[used].desc, "No description available", sizeof(list[used].desc));
+    }
+
+  /* free device list */
+  pcap_freealldevs(alldevs);
+  }
+#endif
+
+/* Add any host specific devices and/or validate those already found */
+used = eth_host_pcap_devices(used, max, list);
+
+/* If no devices were found and an error message was left in the buffer, display it */
+if ((used == 0) && (errbuf[0])) {
+    sim_printf ("Eth: pcap_findalldevs warning: %s\n", errbuf);
+    }
+
 #ifdef HAVE_TAP_NETWORK
 if (used < max) {
 #if defined(__OpenBSD__)
@@ -1135,61 +1187,9 @@ if (used < max) {
   ++used;
   }
 
+/* return device count */
 return used;
 }
-
-static int _eth_devices(int max, ETH_LIST* list)
-{
-int i = 0;
-char errbuf[PCAP_ERRBUF_SIZE] = "";
-#ifndef DONT_USE_PCAP_FINDALLDEVS
-pcap_if_t* alldevs;
-pcap_if_t* dev;
-
-memset(list, 0, max*sizeof(*list));
-errbuf[0] = '\0';
-/* retrieve the device list */
-if (pcap_findalldevs(&alldevs, errbuf) == -1) {
-  if (errbuf[0])
-    sim_printf ("Eth: %s\n", errbuf);
-  }
-else {
-  /* copy device list into the passed structure */
-  for (i=0, dev=alldevs; dev && (i < max); dev=dev->next, ++i) {
-    if ((dev->flags & PCAP_IF_LOOPBACK) || (!strcmp("any", dev->name))) continue;
-    strlcpy(list[i].name, dev->name, sizeof(list[i].name));
-    if (dev->description)
-      strlcpy(list[i].desc, dev->description, sizeof(list[i].desc));
-    else
-      strlcpy(list[i].desc, "No description available", sizeof(list[i].desc));
-    }
-
-  /* free device list */
-  pcap_freealldevs(alldevs);
-  }
-#endif
-
-/* Add any host specific devices and/or validate those already found */
-i = eth_host_devices(i, max, list);
-
-/* If no devices were found and an error message was left in the buffer, display it */
-if ((i == 0) && (errbuf[0])) {
-    sim_printf ("Eth: pcap_findalldevs warning: %s\n", errbuf);
-    }
-
-/* return device count */
-return i;
-}
-
-#else
-struct pcap_pkthdr {
-    uint32 caplen;  /* length of portion present */
-    uint32 len;     /* length this packet (off wire) */
-};
-#define PCAP_ERRBUF_SIZE 256
-typedef void * pcap_t;  /* Pseudo Type to avoid compiler errors */
-#define DLT_EN10MB 1    /* Dummy Value to avoid compiler errors */
-#endif /* HAVE_PCAP_NETWORK */
 
 #ifdef HAVE_TAP_NETWORK
 #if defined(__linux) || defined(__linux__)
@@ -1753,18 +1753,21 @@ static void eth_get_nic_hw_addr(ETH_DEV* dev, const char *devname)
     FILE *f;
     int i;
     const char *patterns[] = {
-        "grep [0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]",
-        "egrep [0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]",
+        "ip link show %.*s | grep [0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]",
+        "ip link show %.*s | egrep [0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]",
+        "ifconfig %.*s | grep [0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]",
+        "ifconfig %.*s | egrep [0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]:[0-9a-fA-F]?[0-9a-fA-F]",
         NULL};
 
     memset(command, 0, sizeof(command));
     /* try to force an otherwise unused interface to be turned on */
+    snprintf(command, sizeof(command)-1, "ip link set dev %.*s up", (int)(sizeof(command) - 21), devname);
+    if (system(command)) {};
     snprintf(command, sizeof(command)-1, "ifconfig %.*s up", (int)(sizeof(command) - 14), devname);
     if (system(command)) {};
     for (i=0; patterns[i] && (0 == dev->have_host_nic_phy_addr); ++i) {
-      snprintf(command, sizeof(command)-1, "ifconfig %.*s | %s  >NIC.hwaddr", (int)(sizeof(command) - (26 + strlen(patterns[i]))), devname, patterns[i]);
-      if (system(command)) {};
-      if (NULL != (f = fopen("NIC.hwaddr", "r"))) {
+      snprintf(command, sizeof(command)-1, patterns[i], (int)(sizeof(command) - (2 + strlen(patterns[i]))), devname);
+      if (NULL != (f = popen(command, "r"))) {
         while (0 == dev->have_host_nic_phy_addr) {
           if (fgets(command, sizeof(command)-1, f)) {
             char *p1, *p2;
@@ -1791,8 +1794,7 @@ static void eth_get_nic_hw_addr(ETH_DEV* dev, const char *devname)
           else
             break;
           }
-        fclose(f);
-        (void)remove("NIC.hwaddr");
+        pclose(f);
         }
       }
     }
