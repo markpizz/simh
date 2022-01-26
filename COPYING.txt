@@ -1,0 +1,68 @@
+The LICENSE.txt file summarizes the general simh license which is 
+essentially stated at the top of all source code files.
+
+The purpose of this COPYING.txt file is to provide guidance for folks 
+who may want to include some or all of the simh code in other projects.
+The point of this guidance is so that the actual version of the simh 
+code is retained in whatever derivative work may be produced so that 
+problems may be reasonably reported AND so that users and developers 
+can easily determine what simh version they are working with.
+
+There are two basic ways to achieve this goal.  The first leverages 
+git's archive feature which in the simh case has simh git commit 
+information embedded in the archive and the second involves using 
+git directly or git's concept of submodules.
+
+GIT ARCHIVE CONSIDERATIONS:
+
+A git archive containing all of the simh components can be acquired
+from the simh gitub repository for the latest simh code from:
+        https://github.com/simh/simh/archive/master.zip
+or for a specific simh commit:
+        https://github.com/simh/simh/archive/<commit-hash>.zip
+        
+The archive produced will automatically contain the specifics of 
+the simh git version that has been archived.
+
+Each time the simh components are acquired as an archive, the 
+derivative project's interesting simh pieces can then be extracted 
+from the archive, and modified as needed by that project's build
+procedures.
+
+--------------------------
+
+GIT SUBMODULE CONSIDERATIONS:
+
+A local clone of the https://github.com/simh/simh repository can
+be kept either as a separate repository or a git-submodule of
+the other project (if that project uses git for source control).
+Whenever the derivative project determines that it wants to pick 
+up simh components from either the latest or a particular commit, 
+it can pull from https://github.com/simh/simh. Like in the archive 
+case, it can then pick up the needed pieces from the local working 
+copy of the simh repository into the project's active files, 
+modify them as needed, but also gather the simh repository's 
+commit id and commit time for the files that have been extracted.
+These commands will extract the appropriate values:
+
+       git log -1 --pretty='%H'
+       git log -1 --pretty='%aI'
+
+It will then need to pass the gathered commit id and commit 
+time into the compiler when building the simh components.
+These values need to be passed into the compile via:
+
+       -DSIM_GIT_COMMIT_ID=
+       -DSIM_GIT_COMMIT_TIME=
+
+--------------------------
+PROJECT SPECIFIC VERSION INDICATOR
+
+With either of the above methods of passing simh version info 
+into the project, the derivative project will probably have 
+its own name and/or version information which would also be 
+useful to include in the simh output of SHOW VERSION.  This 
+can be achieved by adding the following to project's build 
+mechanism when compiling the simh components:
+
+    -DSIM_VERSION_MODE=derivative-project-name-and-or-version

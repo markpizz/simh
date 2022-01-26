@@ -12,7 +12,7 @@
 <!--- output and some other text as 'code' (you can click on the "styling    -->
 <!--- with Markdown" link below this text box for details about markdown).   -->
 <!--- Click on the Preview tab as you're creating this issue to see how the  -->
-<!--- markdown message will be displayed.-->
+<!--- markdown message will be displayed to people who read it.-->
 
 <!--- PLEASE provide the below specified NON OPTIONAL details.
       If they are not provided, the issue will most likely be quickly 
@@ -24,6 +24,20 @@
 <!--- Provide a more detailed introduction to the issue itself, and why you consider it to be a bug or why the suggested change or enhancement would be useful -->
 
 - #### the output of "sim> SHOW VERSION" while running the simulator which is having the issue
+<!--- Look closely at the last couple of lines of the SHOW VERSION  -->
+<!--- output.  Specifically, you are looking for:                   -->
+<!--- git commit id: 8-hex-digits                                   -->
+<!--- git commit time: YYYY-MM-DDTHH:MM:SS-TZ                       -->
+<!--- If you don't see these lines, with hex digits and             -->
+<!--- reasonable time, then you are certainly not running any       -->
+<!--- recent simh code so you should either:                        -->
+<!---  1) pick up the latest code from the simh repository          -->
+<!---     (https://github.com/simh/simh, build your simulator       -->
+<!---     and try to observe your problem there with that version.  -->
+<!---  2) go back to the folks you got your simulator from and ask  -->
+<!---     them to adjust their build procedures following the       -->
+<!---     general advise in the COPYING.txt file located at top of  -->
+<!---     the current repository.                                   -->
 
 - #### how you built the simulator or that you're using prebuilt binaries
 <!--- This should include ALL the output produced by make while building just the simulator that is exhibiting the problem  -->
