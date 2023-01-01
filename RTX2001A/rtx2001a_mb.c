@@ -35,7 +35,7 @@
 
 RTX_WORD ram[RAM_SIZE] = {0};
 
-void _read(t_addr addr, t_value *value)
+void rtx_read(t_addr addr, t_value *value)
 {
     *value = ram[addr] & D16_MASK;
     if (sim_is_running)
@@ -44,7 +44,7 @@ void _read(t_addr addr, t_value *value)
     }
 }
 
-void _write(t_addr addr, t_value value)
+void rtx_write(t_addr addr, t_value value)
 {
     ram[addr] = value;
     sim_debug(DBG_MEB_W, &cpu_dev, "0x%X 0x%X\n", addr, value);
@@ -57,7 +57,7 @@ void _long_fetch(t_addr seg, t_addr address, t_value *value)
     LEA(seg, address, addr);
     if ((addr >= 0) && (addr < RAM_BYTES))
     {
-        _read(addr >> 1, value);
+        rtx_read(addr >> 1, value);
         return;
     }
 
@@ -72,7 +72,7 @@ void _long_store(t_addr seg, t_addr address, t_value data)
     LEA(seg, address, addr);
     if ((addr >= 0) && (addr < RAM_BYTES))
     {
-        _write(addr >> 1, data & D16_MASK);
+        rtx_write(addr >> 1, data & D16_MASK);
         return;
     }
 
@@ -209,7 +209,7 @@ void ustore(t_addr offset, t_value data)
     t_addr addr = ubr.fields.page | ((offset << 1) & 0x003E);
     sim_debug(DBG_ASB_R, &cpu_dev, "data=0x%X UBR=0x%X offset=0x%X addr=0x%X\n", data, ubr.pr, offset, addr);
     // sim_debug(DBG_ASB_R, &cpu_dev, "PC=0x%X UPR=0x%X addr=0x%X\n", asic_file[PC], upr.pr, addr);
-    _write(addr, data);
+    rtx_write(addr, data);
 }
 
 void ufetch(t_addr offset, t_value *data)
@@ -217,6 +217,6 @@ void ufetch(t_addr offset, t_value *data)
     // See RTX 2001A Datasheet; Fig 13, pg 10
     t_addr addr = ubr.fields.page | ((offset << 1) & 0x003E);
     // sim_debug(DBG_ASB_R, &cpu_dev, "PC=0x%X UPR=0x%X addr=0x%X\n", asic_file[PC], upr.pr, addr);
-    _read(addr, data);
+    rtx_read(addr, data);
     sim_debug(DBG_ASB_R, &cpu_dev, "data=0x%X UBR=0x%X offset=0x%X addr=0x%X\n", *data, ubr.pr, offset, addr);
 }

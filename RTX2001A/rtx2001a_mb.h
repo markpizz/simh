@@ -44,8 +44,8 @@
 
 extern RTX_WORD ram[RAM_SIZE];
 
-extern void _read(t_addr, t_value *);
-extern void _write(t_addr, t_value);
+extern void rtx_read(t_addr, t_value *);
+extern void rtx_write(t_addr, t_value);
 extern void _long_fetch(t_addr, t_addr, t_value *);
 extern void _long_store(t_addr, t_addr, t_value);
 extern void byte_fetch(t_addr, t_value *);

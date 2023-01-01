@@ -114,7 +114,8 @@ t_value rtx2001a_pc_value(void)
 */
 t_stat sim_instr(void)
 {
-  t_stat reason = 0;
+    int32 abortval;
+    t_stat reason = 0;
 
   sim_cancel_step(); /* defang SCP step. See SSEM */
 
@@ -127,7 +128,7 @@ t_stat sim_instr(void)
      All variables used in setjmp processing, or assumed to be valid
      after setjmp, must be volatile or global.
   */
-  int32 abortval = setjmp(save_env); /* set abort hdlr */
+  abortval = setjmp(save_env); /* set abort hdlr */
   if (0 != abortval)
   {
     return abortval;
@@ -233,7 +234,7 @@ t_stat sim_instr(void)
   return reason;
 }
 
-t_stat cpu_boot(t_value unit_num, DEVICE *dptr)
+t_stat cpu_boot(int32 unit_num, DEVICE *dptr)
 {
   _long_fetch(cpr.fields.pr, 0, &IR);
   INC_PC;
@@ -265,6 +266,7 @@ t_stat cpu_dep(t_value val, t_addr ea, UNIT *uptr, t_svalue sw)
 
 t_stat cpu_reset(DEVICE *dptr)
 {
+  REG *rptr = NULL;
   // init debug support
   // sim_brk_types = DBG_ASB; // SWMASK('E'); //| DBG_ASB | DBG_PSB | DBG_MEB | DBG_RSB;
   sim_brk_dflt = SWMASK('E');
@@ -288,7 +290,6 @@ t_stat cpu_reset(DEVICE *dptr)
   STREAM = 0;
 
   // Initialize ASIC bus
-  REG *rptr = NULL;
   for (rptr = dptr->registers; (rptr != NULL) && (rptr->name != NULL); rptr++)
   {
     if (0 == strcmp(rptr->name, "I"))

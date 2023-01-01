@@ -66,7 +66,7 @@ extern void do_fetch_swap_alu_2();
 extern void do_list_2();
 extern void do_qdup_0branch();
 extern void do_store_lit_2();
-extern void bad_insn(void);
+extern void bad_insn();
 extern void D_swap();
 
 RTX_WORD clocks;

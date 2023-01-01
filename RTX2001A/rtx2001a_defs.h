@@ -39,7 +39,7 @@ extern DEVICE cpu_dev;
 extern int32 sim_emax; // contains the maximum number of words needed to hold the largest instruction or data item in the VM.  Examine and deposit will process up to sim_emax words.
 extern t_stat cpu_reset(DEVICE *);
 extern t_stat do_cmd_label(int32 flag, CONST char *fcptr, CONST char *label);
-extern t_stat cpu_boot(t_value unit_num, DEVICE *dptr);
+extern t_stat cpu_boot(int32 unit_num, DEVICE *dptr);
 extern jmp_buf save_env;
 extern jmp_buf bkpt_env; // breakpoint handler
 

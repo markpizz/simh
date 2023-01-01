@@ -232,6 +232,7 @@ t_stat decode_short_lit(t_value instruction, machine_op *opcode)
  */
 t_stat decode_gbus(t_value instruction, machine_op *opcode)
 {
+    int middle_flag;
     int result = 0;
 
     if ((instruction & 0xFF40) == 0xB000)
@@ -244,7 +245,7 @@ t_stat decode_gbus(t_value instruction, machine_op *opcode)
     }
 
     // Prevent operations on certain ASIC addresses
-    int middle_flag = ((instruction & 0x001F) > 0x07 && (instruction & 0x001F) < 0x18) ? TRUE : FALSE;
+    middle_flag = ((instruction & 0x001F) > 0x07 && (instruction & 0x001F) < 0x18) ? TRUE : FALSE;
     *opcode = OP_RESERVED;
 
     switch (instruction & 0x00C0)

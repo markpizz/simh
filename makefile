@@ -2265,6 +2265,18 @@ SEL32 = ${SEL32D}/sel32_cpu.c ${SEL32D}/sel32_sys.c ${SEL32D}/sel32_chan.c \
 	$(NETWORK_DEPS)
 SEL32_OPT = -I ${SEL32D} -DUSE_INT32 -DSEL32  ${NETWORK_OPT}
 
+RTX2001AD = ${SIMHD}/RTX2001A/
+RTX2001A = \
+	${RTX2001AD}rtx2001a_cpu.c \
+	${RTX2001AD}rtx2001a_sys.c \
+	${RTX2001AD}rtx2001a_decode.c \
+	${RTX2001AD}rtx2001a_execute.c \
+	${RTX2001AD}rtx2001a_ab.c \
+	${RTX2001AD}rtx2001a_mb.c \
+	${RTX2001AD}rtx2001a_psb.c \
+	${RTX2001AD}rtx2001a_rsb.c
+RTX2001A_OPT = -I $(RTX2001AD)
+
 ###
 ### Experimental simulators
 ###
@@ -2319,7 +2331,7 @@ ALL = pdp1 pdp4 pdp7 pdp8 pdp9 pdp15 pdp11 pdp10 \
 	swtp6800mp-a swtp6800mp-a2 tx-0 ssem b5500 intel-mds \
 	scelbi 3b2 3b2-700 i701 i704 i7010 i7070 i7080 i7090 \
 	sigma uc15 pdp10-ka pdp10-ki pdp10-kl pdp10-ks pdp6 i650 \
-	imlac tt2500 sel32 
+	imlac tt2500 sel32 rtx2001a
 
 all : ${ALL}
 
@@ -2623,6 +2635,12 @@ sel32 : $(BIN)sel32$(EXE)
 
 $(BIN)sel32$(EXE) : ${SEL32} ${SIM}
 	$(MAKEIT) OPTS="$(SEL32_OPT)"
+
+
+rtx2001a : $(BIN)rtx2001a$(EXE)
+
+$(BIN)rtx2001a$(EXE) : ${RTX2001A} ${SIM}
+	$(MAKEIT) OPTS="$(RTX2001A_OPT)"
 
 
 altair : $(BIN)altair$(EXE)
