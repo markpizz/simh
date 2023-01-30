@@ -70,6 +70,10 @@ struct ROM_File_Descriptor {
    {"PDP11/dazzledart/dazzle.lda",      "PDP11/pdp11_dazzle_dart_rom.h",             6096,            0xFFF83848,        "dazzle_lda"},
    {"PDP11/11logo/11logo.lda",          "PDP11/pdp11_11logo_rom.h",                 26009,            0xFFDD77F7,        "logo_lda"},
    {"swtp6800/swtp6800/swtbugv10.bin",  "swtp6800/swtp6800/swtp_swtbugv10_bin.h",    1024,            0xFFFE4FBC,        "swtp_swtbugv10_bin"},
+   {"SDS/940_active0.png",              "SDS/940_active0_png.h",                  1629300,            0xF3C93374,        "active0_940_png"},
+   {"SDS/940_active1.png",              "SDS/940_active1_png.h",                  1387720,            0xF573D842,        "active1_940_png"},
+   {"SDS/940_active2.png",              "SDS/940_active2_png.h",                  1620629,            0xF3D56FD1,        "active2_940_png"},
+   {"SDS/940_inactive.png",             "SDS/940_inactive_png.h",                 1392790,            0xF5690E8A,        "inactive_940_png"},
    };
 
 
