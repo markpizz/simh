@@ -233,8 +233,8 @@ endif
 ifneq (,$(findstring pdp7,${MAKECMDGOALS}))
   VIDEO_USEFUL = true
 endif
-# building the PDP-8 could use video support
-ifneq (,$(findstring pdp8,${MAKECMDGOALS}))
+# building the PDP-8 could use video support and the SDSCP (front panel) needs video support
+ifneq (,$(or $(findstring pdp8,${MAKECMDGOALS}),$(findstring sds,${MAKECMDGOALS})))
   VIDEO_USEFUL = true
 endif
 # building the pdp11, any pdp10, any 3b2, or any vax simulator could use networking support
@@ -2308,6 +2308,13 @@ SDS = ${SDSD}/sds_cpu.c ${SDSD}/sds_drm.c ${SDSD}/sds_dsk.c ${SDSD}/sds_io.c \
 	${SDSD}/sds_stddev.c ${SDSD}/sds_sys.c ${SDSD}/sds_cp.c ${SDSD}/sds_cr.c
 SDS_OPT = -I ${SDSD} -DUSE_SIM_CARD
 
+SDSCP = ${SDSD}/sds_cpnl.c sim_sock.c sim_frontpanel.c
+SDSCP_OPT = -I ${SDSD} ${VIDEO_CCDEFS}
+ifeq (Darwin,$(OSTYPE))
+  SDSCP_LNK_OPT = -lpng -sectcreate __TEXT __info_plist ${SDSD}/sds_cpnl.xml
+else
+  SDSCP_LNK_OPT = -lpng
+endif
 
 SWTP6800D = ${SIMHD}/swtp6800/swtp6800
 SWTP6800C = ${SIMHD}/swtp6800/common
@@ -2941,11 +2948,16 @@ $(BIN)id32$(EXE) : ${ID32} ${SIM}
 	$(MAKEIT) OPTS="$(ID32_OPT)"
 
 
-sds : $(BIN)sds$(EXE)
+sds : $(BIN)sds$(EXE) $(BIN)sdscp$(EXE)
 
 $(BIN)sds$(EXE) : ${SDS} ${SIM}
 	$(MAKEIT) OPTS="$(SDS_OPT)"
 
+# SDS GUI Front Panel program
+sdscp : $(BIN)sdscp$(EXE)
+
+$(BIN)sdscp$(EXE) : ${SDSCP} ${BUILD_ROMS}
+	$(MAKEIT) LNK_OPTS="$(SDSCP_LNK_OPT)" OPTS="$(SDSCP_OPT)" TESTS=0
 
 swtp6800mp-a : $(BIN)swtp6800mp-a$(EXE)
 
