@@ -210,8 +210,9 @@ typedef struct RTC {
     uint32 calib_initializations;   /* Initialization Count */
     double calib_tick_time;         /* ticks time */
     double calib_tick_time_tot;     /* ticks time - total*/
-    uint32 calib_ticks_acked;       /* ticks Acked */
+    uint32 calib_ticks_acked;       /* ticks Acked since last calibration */
     uint32 calib_ticks_acked_tot;   /* ticks Acked - total */
+    uint32 calib_ticks_unacked_tot; /* ticks Unacked - total */
     uint32 clock_ticks;             /* ticks delivered since catchup base */
     uint32 clock_ticks_tot;         /* ticks delivered since catchup base - total */
     double clock_init_base_time;    /* reference time for clock initialization */
@@ -222,6 +223,7 @@ typedef struct RTC {
     uint32 clock_catchup_ticks_curr;/* Record of catchups in this second */
     t_bool clock_catchup_pending;   /* clock tick catchup pending */
     t_bool clock_catchup_eligible;  /* clock tick catchup eligible */
+    uint32 clock_catchup_delay;     /* clock tick delay before catchup tick */
     uint32 clock_time_idled;        /* total time idled */
     uint32 clock_time_idled_last;   /* total time idled as of the previous second */
     uint32 clock_calib_skip_idle;   /* Calibrations skipped due to idling */
@@ -949,7 +951,7 @@ if (rtc->hz != ticksper) {                          /* changing tick rate? */
 
         if ((tmr != sim_calb_tmr) && rtc->clock_unit && (ticksper > crtc->hz)) {
             sim_catchup_ticks = TRUE;
-            sim_debug (DBG_CAL, &sim_timer_dev, "sim_rtcn_calb(%d) - forcing catchup ticks for %s ticking at %d, host tick rate %ds\n", tmr, sim_uname (rtc->clock_unit), ticksper, sim_os_tick_hz);
+            sim_debug (DBG_CAL, &sim_timer_dev, "sim_rtcn_calb(%d) - forcing catchup ticks for %s ticking at %d, host tick rate %d/sec\n", tmr, sim_uname (rtc->clock_unit), ticksper, sim_os_tick_hz);
             _rtcn_tick_catchup_check (rtc, 0);
             }
         }
@@ -967,9 +969,20 @@ if (rtc->clock_catchup_pending) {                   /* catchup tick? */
     ++rtc->clock_catchup_ticks_curr;
     rtc->clock_catchup_pending = FALSE;
     }
+else {
+    if (rtc->clock_catchup_eligible && (rtc->calib_ticks_acked < rtc->ticks)) {
+        sim_debug (DBG_CAL|DBG_TIK, &sim_timer_dev, "sim_rtcn_calb(tmr=%d) Missed Tick Ack after %u ticks in current second\n", tmr, rtc->ticks);
+        ++rtc->calib_ticks_unacked_tot;
+        rtc->clock_catchup_pending = TRUE;
+        sim_activate_abs (rtc->timer_unit, rtc->clock_catchup_delay);     /* Schedule retry of missed tick */
+        return rtc->currd;
+        }
+    }
 rtc->ticks += 1;                                    /* count ticks */
 if (rtc->ticks < ticksper)                          /* 1 sec yet? */
     return rtc->currd;
+rtc->calib_ticks_acked_tot += rtc->calib_ticks_acked;
+rtc->calib_ticks_acked = 0;
 catchup_ticks_curr = rtc->clock_catchup_ticks_curr;
 rtc->clock_catchup_ticks_curr = 0;
 rtc->ticks = 0;                                     /* reset ticks */
@@ -1334,9 +1347,11 @@ for (tmr=clocks=0; tmr<=SIM_NTIMERS; ++tmr) {
     if (rtc->clock_skew_max != 0.0)
         fprintf (st, "  Peak Clock Skew:           %s%s\n", sim_fmt_secs (fabs(rtc->clock_skew_max)), (rtc->clock_skew_max < 0) ? " fast" : " slow");
     if (rtc->calib_ticks_acked)
-        fprintf (st, "  Ticks Acked:               %s\n",   sim_fmt_numeric ((double)rtc->calib_ticks_acked));
+        fprintf (st, "  Ticks Acked this second:   %s\n",   sim_fmt_numeric ((double)rtc->calib_ticks_acked));
     if (rtc->calib_ticks_acked_tot+rtc->calib_ticks_acked != rtc->calib_ticks_acked)
         fprintf (st, "  Total Ticks Acked:         %s\n",   sim_fmt_numeric ((double)(rtc->calib_ticks_acked_tot+rtc->calib_ticks_acked)));
+    if (rtc->calib_ticks_unacked_tot != 0)
+        fprintf (st, "  Total Ticks Unacked:       %s\n",   sim_fmt_numeric ((double)(rtc->calib_ticks_unacked_tot)));
     if (rtc->calib_tick_time)
         fprintf (st, "  Tick Time:                 %s\n",   sim_fmt_secs (rtc->calib_tick_time));
     if (rtc->calib_tick_time_tot+rtc->calib_tick_time != rtc->calib_tick_time)
@@ -1347,6 +1362,8 @@ for (tmr=clocks=0; tmr<=SIM_NTIMERS; ++tmr) {
         fprintf (st, "  Catchup Ticks this second: %s\n",   sim_fmt_numeric ((double)rtc->clock_catchup_ticks_curr));
     if (rtc->clock_catchup_ticks_tot+rtc->clock_catchup_ticks != rtc->clock_catchup_ticks)
         fprintf (st, "  Total Catchup Ticks Sched: %s\n",   sim_fmt_numeric ((double)(rtc->clock_catchup_ticks_tot+rtc->clock_catchup_ticks)));
+    if (rtc->clock_catchup_delay)
+        fprintf (st, "  Catchup Tick Delay:        %u %s\n",rtc->clock_catchup_delay, sim_vm_interval_units);
     if (rtc->clock_init_base_time) {
         _double_to_timespec (&now, rtc->clock_init_base_time);
         time_t_now = (time_t)now.tv_sec;
@@ -2598,8 +2615,9 @@ if ((tmr < 0) || (tmr > SIM_NTIMERS))
     return SCPE_TIMER;
 rtc = &rtcs[tmr];
 sim_debug (DBG_ACK, &sim_timer_dev, "sim_rtcn_tick_ack - for %s\n", sim_uname (rtc->clock_unit));
-_rtcn_tick_catchup_check (rtc, (int32)time);
+rtc->clock_catchup_delay = time;
 ++rtc->calib_ticks_acked;
+_rtcn_tick_catchup_check (rtc, (int32)time);
 return SCPE_OK;
 }
 
