@@ -16852,6 +16852,60 @@ delete_Stack (postfix);
 return cptr;
 }
 
+typedef t_stat (*func_0)();
+typedef t_stat (*func_1)(void *);
+typedef t_stat (*func_2)(void *, void *);
+typedef t_stat (*func_3)(void *, void *, void *);
+typedef t_stat (*func_4)(void *, void *, void *, void *);
+typedef t_stat (*func_5)(void *, void *, void *, void *, void *);
+
+t_stat sim_call (ALTERNATE_THREAD_CALL *call)
+{
+switch (call->arg_count) {
+    case 0:
+        call->result = ((func_0)call->func) ();
+        break;
+    case 1:
+        call->result = ((func_1)call->func) (call->arg1);
+        break;
+    case 2:
+        call->result = ((func_2)call->func) (call->arg1, call->arg2);
+        break;
+    case 3:
+        call->result = ((func_3)call->func) (call->arg1, call->arg2, call->arg3);
+        break;
+    case 4:
+        call->result = ((func_4)call->func) (call->arg1, call->arg2, call->arg3, call->arg4);
+        break;
+    case 5:
+        call->result = ((func_5)call->func) (call->arg1, call->arg2, call->arg3, call->arg4, call->arg5);
+        break;
+    default:
+        call->result = sim_messagef (SCPE_IERR, "Unexpected parameter in sim_call()\n");
+    }
+return call->result;
+}
+
+t_stat sim_call_in_main_thread (ALTERNATE_THREAD_CALL *call)
+{
+#if defined (SDL_MAIN_AVAILABLE)
+SDL_Event user_event;
+
+user_event.type = SDL_USEREVENT;
+user_event.user.code = EVENT_EXTERNAL;
+user_event.user.data1 = &sim_call;
+user_event.user.data2 = call;
+call->result = -1;
+while (SDL_PushEvent (&user_event) < 0)
+    sim_os_ms_sleep (10);
+while (call->result == -1)
+    SDL_Delay (20);
+return call->result;
+#else
+return sim_call (call);
+#endif
+}
+
 /*
  * To avoid Coverity complaints about the use of rand() we define the function locally
  * This implementation of Lehmer's minimal standard algorithm is derived

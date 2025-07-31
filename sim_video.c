@@ -335,21 +335,6 @@ static int SDL_SavePNG_RW(SDL_Surface *surface, SDL_RWops *dst, int freedst)
 
  */
 
-#define EVENT_REDRAW      1                              /* redraw event for SDL */
-#define EVENT_CLOSE       2                              /* close event for SDL */
-#define EVENT_CURSOR      3                              /* new cursor for SDL */
-#define EVENT_WARP        4                              /* warp mouse position for SDL */
-#define EVENT_DRAW        5                              /* draw/blit region for SDL */
-#define EVENT_SHOW        6                              /* show SDL capabilities */
-#define EVENT_OPEN        7                              /* vid_open request */
-#define EVENT_EXIT        8                              /* program exit */
-#define EVENT_SCREENSHOT  9                              /* produce screenshot of video window */
-#define EVENT_BEEP       10                              /* audio beep */
-#define EVENT_FULLSCREEN 11                              /* fullscreen */
-#define EVENT_SIZE       12                              /* set window size */
-#define EVENT_LOGICAL    13                              /* set window logical size */
-#define MAX_EVENTS       20                              /* max events in queue */
-
 typedef struct {
     SIM_KEY_EVENT events[MAX_EVENTS];
     SDL_sem *sem;
@@ -369,7 +354,8 @@ typedef struct {
 int vid_thread (void* arg);
 int vid_video_events (VID_DISPLAY *vptr);
 void vid_show_video_event (void);
-void vid_screenshot_event (void);
+void vid_screenshot_event (SDL_Event *user_event);
+void vid_external_event (SDL_Event *user_event);
 void vid_beep_event (void);
 static void vid_beep_setup (int duration_ms, int tone_frequency);
 static void vid_beep_cleanup (void);
@@ -485,6 +471,8 @@ switch (ev->type) {
         uev = (SDL_UserEvent *)ev;
         if (uev->code == EVENT_SCREENSHOT)
             return &vid_first;      /* Currently only support screenshot of the first windown */
+        if (uev->code == EVENT_EXTERNAL)
+            return NULL;
         sim_messagef (SCPE_OK, "Unrecognized user event.\n");
         sim_messagef (SCPE_OK, "  type = %u\n", uev->type);
         sim_messagef (SCPE_OK, "  timestamp = %u\n", uev->timestamp);
@@ -571,16 +559,21 @@ while (1) {
             if (event.user.code == EVENT_OPEN) {
                 SDL_Init (SDL_INIT_VIDEO);
                 vid_video_events ((VID_DISPLAY *)event.user.data1);
-            }
+                }
             else {
                 if (event.user.code == EVENT_SHOW)
                     vid_show_video_event ();
                 else {
                     if (event.user.code == EVENT_SCREENSHOT)
-                        vid_screenshot_event ();
-                    else {
-                        sim_printf ("main(): Unexpected User event: %d\n", event.user.code);
-                        break;
+                        vid_screenshot_event (&event);
+                    else { 
+                        if (event.user.code == EVENT_EXTERNAL) {
+                            vid_external_event (&event);
+                            }
+                        else {
+                            sim_printf ("main(): Unexpected User event: %d\n", event.user.code);
+                            break;
+                            }
                         }
                     }
                 }
@@ -2164,7 +2157,7 @@ while (vid_active) {
                 break;
 
             case SDL_USEREVENT:
-                /* There are 11 user events generated */
+                /* There are 12 user events generated */
                 /* EVENT_REDRAW      to update the display */
                 /* EVENT_DRAW        to update a region in the display texture */
                 /* EVENT_SHOW        to display the current SDL video capabilities */
@@ -2178,6 +2171,7 @@ while (vid_active) {
                 /* EVENT_FULLSCREEN  to change fullscreen */
                 /* EVENT_SIZE        to change screen size */
                 /* EVENT_LOGICAL     to change screen size */
+                /* EVENT_EXTERNAL    call of external function in main thread */
                 while (vid_active && event.user.code) {
                     /* Handle Beep first since it isn't a window oriented event */
                     if (event.user.code == EVENT_BEEP) {
@@ -2230,7 +2224,7 @@ while (vid_active) {
                         event.user.code = 0;    /* Mark as done */
                         }
                     if (event.user.code == EVENT_SCREENSHOT) {
-                        vid_screenshot_event ();
+                        vid_screenshot_event (&event);
                         event.user.code = 0;    /* Mark as done */
                         }
                     if (event.user.code == EVENT_SIZE) {
@@ -2256,6 +2250,10 @@ while (vid_active) {
                         VID_DISPLAY *vptr = (VID_DISPLAY *)event.user.data1;
                         vid_new_window (vptr);
                         vptr->vid_ready = TRUE;
+                        event.user.code = 0;    /* Mark as done */
+                        }
+                    if (event.user.code == EVENT_EXTERNAL) {
+                        vid_external_event (&event);
                         event.user.code = 0;    /* Mark as done */
                         }
                     if (event.user.code != 0) {
@@ -2711,17 +2709,16 @@ else {
     }
 }
 
-static t_stat _screenshot_stat;
-static const char *_screenshot_filename;
-
-void vid_screenshot_event (void)
+void vid_screenshot_event (SDL_Event *user_event)
 {
+t_stat *p_screenshot_stat = (t_stat *)user_event->user.data2;
+const char *_screenshot_filename = (const char *)user_event->user.data1;
 VID_DISPLAY *vptr;
 int i = 0, n;
 char *name = (char *)malloc (strlen (_screenshot_filename) + 5);
 char *extension = strrchr ((char *)_screenshot_filename, '.');
 if (name == NULL) {
-    _screenshot_stat = SCPE_NXM;
+    *p_screenshot_stat = SCPE_NXM;
     return;
     }
 if (extension)
@@ -2736,8 +2733,8 @@ for (vptr = &vid_first; vptr != NULL; vptr = vptr->next) {
         sprintf (name + n, "%d%s", i++, extension);
     else
         sprintf (name + n, "%s", extension);
-    _screenshot_stat = _vid_screenshot (vptr, name);
-    if (_screenshot_stat != SCPE_OK) {
+    *p_screenshot_stat = _vid_screenshot (vptr, name);
+    if (*p_screenshot_stat != SCPE_OK) {
         free (name);
         return;
         }
@@ -2748,23 +2745,26 @@ free (name);
 t_stat vid_screenshot (const char *filename)
 {
 SDL_Event user_event;
-
-_screenshot_stat = -1;
-_screenshot_filename = filename;
+t_stat _screenshot_stat = -1;
 
 user_event.type = SDL_USEREVENT;
 user_event.user.code = EVENT_SCREENSHOT;
-user_event.user.data1 = NULL;
-user_event.user.data2 = NULL;
+user_event.user.data1 = (void *)filename;
+user_event.user.data2 = (void *)&_screenshot_stat;
 #if defined (SDL_MAIN_AVAILABLE)
 while (SDL_PushEvent (&user_event) < 0)
     sim_os_ms_sleep (10);
 #else
-vid_screenshot_event ();
+vid_screenshot_event (&user_event);
 #endif
 while (_screenshot_stat == -1)
     SDL_Delay (20);
 return _screenshot_stat;
+}
+
+void vid_external_event (SDL_Event *user_event)
+{
+((t_stat (*)(void *args))user_event->user.data1)(user_event->user.data2);
 }
 
 #include <SDL_audio.h>

@@ -408,6 +408,37 @@ struct SEND {
 
 t_stat _sim_os_putchar (int32 out);
 
+struct alternate_thread_call {
+    volatile t_stat result;
+    t_stat (*func)(void *args);
+    int arg_count;
+    void *arg1;
+    void *arg2;
+    void *arg3;
+    void *arg4;
+    void *arg5;
+    };
+typedef struct alternate_thread_call ALTERNATE_THREAD_CALL;
+t_stat sim_call_in_main_thread (ALTERNATE_THREAD_CALL *call);
+
+/* SIMH specific events processed as dispatched through SDL */
+
+#define EVENT_REDRAW      1                              /* redraw event for SDL */
+#define EVENT_CLOSE       2                              /* close event for SDL */
+#define EVENT_CURSOR      3                              /* new cursor for SDL */
+#define EVENT_WARP        4                              /* warp mouse position for SDL */
+#define EVENT_DRAW        5                              /* draw/blit region for SDL */
+#define EVENT_SHOW        6                              /* show SDL capabilities */
+#define EVENT_OPEN        7                              /* vid_open request */
+#define EVENT_EXIT        8                              /* program exit */
+#define EVENT_SCREENSHOT  9                              /* produce screenshot of video window */
+#define EVENT_BEEP       10                              /* audio beep */
+#define EVENT_FULLSCREEN 11                              /* fullscreen */
+#define EVENT_SIZE       12                              /* set window size */
+#define EVENT_LOGICAL    13                              /* set window logical size */
+#define EVENT_EXTERNAL   14                              /* call external API (Non SDL function) */
+#define MAX_EVENTS       20                              /* max events in queue */
+
 
 #endif /* defined(SIM_SCP_PRIVATE_DONT_REPEAT) */
 
