@@ -1412,7 +1412,10 @@ const char *eth_capabilities(void)
 #endif
  strlcat (capabilities, "Ethernet Packet transports", sizeof (capabilities));
 #if defined (HAVE_VMNET_NETWORK)
- strlcat (capabilities, ":PCAP(vmnet):TAP(vmnet)", sizeof (capabilities));
+ strlcat (capabilities, ":PCAP(vmnet)", sizeof (capabilities));
+#if defined(USE_VMNET_HOST_AS_TAP)
+ strlcat (capabilities, ":TAP(vmnet)", sizeof (capabilities));
+#endif
 #if defined(USE_VMNET_SHARED_AS_NAT)
  strlcat (capabilities, ":NAT(vmnet)", sizeof (capabilities));
 #endif
@@ -1420,7 +1423,7 @@ const char *eth_capabilities(void)
 #if defined (HAVE_PCAP_NETWORK)
  strlcat (capabilities, ":PCAP", sizeof (capabilities));
 #endif
-#if defined (HAVE_TAP_NETWORK)
+#if defined (HAVE_TAP_NETWORK) && !defined (USE_VMNET_HOST_AS_TAP)
  strlcat (capabilities, ":TAP", sizeof (capabilities));
 #endif
 #if defined (HAVE_VDE_NETWORK)
@@ -1512,12 +1515,14 @@ if (1) {
     }
   xpc_release(interface_list);
 
+#if defined(USE_VMNET_HOST_AS_TAP)
   if (used < max) {
     sprintf(list[used].name, "%s", "tap:{optional-tap-parameters}");
     sprintf(list[used].desc, "%s", "Integrated host-only network (vmnet) support");
     list[used].eth_api = ETH_API_VMNET;
     ++used;
     }
+#endif
 #if defined(USE_VMNET_SHARED_AS_NAT)
   if (used < max) {
     sprintf(list[used].name, "%s", "nat:{optional-nat-parameters}");
@@ -2853,149 +2858,7 @@ if (0 == strncmp("nat:", savname, 4)) {
 #endif /* defined(HAVE_SLIRP_NETWORK) */
   }
 #endif /* !defined(USE_VMNET_SHARED_AS_NAT) */
-/* Setting parameters on a vmnet SHARED interface doesn't actually   */
-/* work as described in the documentation.  If, in the future, it    */
-/* does, and the network block can actually be specified along with  */
-/* configuring inbound UDP and TCP port mapping, this can be enabled */
-/* along with implementing any currently missing pieces.             */
-#if defined(HAVE_VMNET_NETWORK)
-xpc_object_t if_desc;
-dispatch_queue_t vmn_queue;
-interface_ref vmn_interface;
-char gbuf[CBUFSIZE];
-char *hostaddr = NULL;
-char *endaddr = NULL;
-char *netmask = NULL;
-
-if_desc = xpc_dictionary_create(NULL, NULL, 0);
-#if defined(USE_VMNET_SHARED_AS_NAT)
-if (0 == strncasecmp(savname, "nat:", 4)) {
-  NAT nat;
-  int err = 0;
-  
-  memset(&nat, 0, sizeof(NAT));
-  xpc_dictionary_set_uint64(if_desc, vmnet_operation_mode_key, VMNET_SHARED_MODE);
-  /* First, start with the original NAT default */
-  sim_nat_parse_args (&nat, "GATEWAY=10.0.2.2,MASKLEN=24,DHCP=10.0.2.15", ETH_API_VMNET, (char *)errbuf, sizeof(errbuf));
-  err = sim_nat_parse_args (&nat, &savname[4], ETH_API_VMNET, (char *)errbuf, sizeof(errbuf));
-  if (err == 0) {
-    if (nat.vdhcp_start.s_addr != INADDR_ANY)
-      hostaddr = strdup (inet_ntoa (nat.vdhcp_start));
-    if (nat.vdhcp_end.s_addr != INADDR_ANY)
-      endaddr = strdup (inet_ntoa (nat.vdhcp_end));
-    if (nat.vnetmask.s_addr != INADDR_ANY)
-      netmask = strdup (inet_ntoa (nat.vnetmask));
-    if (hostaddr)
-      xpc_dictionary_set_string(if_desc, vmnet_start_address_key, hostaddr);
-    if (endaddr)
-      xpc_dictionary_set_string(if_desc, vmnet_end_address_key, endaddr);
-    if (netmask)
-      xpc_dictionary_set_string(if_desc, vmnet_host_subnet_mask_key, netmask);
-    xpc_dictionary_set_bool(if_desc, vmnet_enable_isolation_key, TRUE);
-    }
-  // Need NAT parameter parsing, TCP and UDP port allowances and setup
-  }
-else {
-#else /* !defined(USE_VMNET_SHARED_AS_NAT) */
-if (1) {
-#endif /* !defined(USE_VMNET_SHARED_AS_NAT) */
-  if (0 == strncasecmp(savname, "tap:", 4)) {
-    const char *tptr = savname + 4;
-    unsigned char net_uuid[16];
-    NAT nat;
-    int err = 0;
-
-    memset(&nat, 0, sizeof(nat));
-    xpc_dictionary_set_uint64(if_desc, vmnet_operation_mode_key, VMNET_HOST_MODE);
-    tptr = get_glyph_nc (tptr, gbuf, ',');
-    _eth_tap_uuid (gbuf, net_uuid);
-    xpc_dictionary_set_uuid(if_desc, vmnet_network_identifier_key, net_uuid);
-    if ((tptr != NULL) && (*tptr != '\0')) {
-      err = sim_nat_parse_args (&nat, tptr, ETH_API_VMNET, (char *)errbuf, sizeof(errbuf));
-      if (err != 0) {
-        xpc_release(if_desc);
-        snprintf (errbuf, errbuf_size, "Error parsing vmnet tap: device parameters");
-        return SCPE_OPENERR;
-        }
-      if (nat.vgateway.s_addr != INADDR_ANY)
-        hostaddr = strdup (inet_ntoa (nat.vgateway));
-      if (nat.vnetmask.s_addr != INADDR_NONE)
-        netmask = strdup (inet_ntoa (nat.vnetmask));
-      if (((hostaddr != NULL) && (netmask == NULL)) ||
-          ((hostaddr == NULL) && (netmask != NULL))){
-        free(hostaddr);
-        free(endaddr);
-        free(netmask);
-        xpc_release(if_desc);
-        snprintf (errbuf, errbuf_size, "Both the HOSTIP and MASKLEN must be specified together vmnet host (tap:) device");
-        return SCPE_OPENERR;
-        }
-      if (hostaddr)
-        xpc_dictionary_set_string(if_desc, vmnet_host_ip_address_key, hostaddr);
-      if (netmask)
-        xpc_dictionary_set_string(if_desc, vmnet_host_subnet_mask_key, netmask);
-      }
-    }
-  else { // Bridged, so check if we've got a reasonable device name
-    xpc_object_t interface_list = vmnet_copy_shared_interface_list();
-    int i, interface_count = xpc_array_get_count(interface_list);
-
-    for (i=0; i<interface_count; i++) {
-      xpc_object_t element = xpc_array_get_value(interface_list, i);
-
-      if (0 == strcmp(savname, xpc_string_get_string_ptr(element)))
-        break;
-      }
-    if (i == interface_count) { /* Not found? */
-      free(hostaddr);
-      free(endaddr);
-      free(netmask);
-      xpc_release(if_desc);
-      snprintf (errbuf, errbuf_size, "You must specify either an appropriate vmnet bridged interface or a tap:");
-      return SCPE_OPENERR;
-      }
-    xpc_dictionary_set_uint64(if_desc, vmnet_operation_mode_key, VMNET_BRIDGED_MODE);
-    xpc_dictionary_set_string(if_desc, vmnet_shared_interface_name_key, savname);
-    }
-  }
-
-vmn_queue = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
-
-_open_port_vmnet_cb_finished = dispatch_semaphore_create(0);
-_open_port_opaque = opaque;
-
-vmn_interface = vmnet_start_interface(if_desc, vmn_queue, ^(vmnet_return_t status, xpc_object_t params)
-  {
-  _open_port_vmnet_status = status;
-  if (status == VMNET_SUCCESS) {
-      /* The logical device (bridge or otherwise) vmnet provides has its own MAC address which */
-      /* becomes the host system's address from the simulator's point of view */
-    if (SCPE_OK == eth_mac_scan (&((ETH_DEV*)_open_port_opaque)->host_nic_phy_hw_addr, xpc_dictionary_get_string(params, vmnet_mac_address_key)))
-      ((ETH_DEV*)_open_port_opaque)->have_host_nic_phy_addr = 1;
-    }
-  dispatch_semaphore_signal(_open_port_vmnet_cb_finished);
-  });
-
-dispatch_semaphore_wait(_open_port_vmnet_cb_finished, DISPATCH_TIME_FOREVER);
-dispatch_release(_open_port_vmnet_cb_finished);
-_open_port_vmnet_cb_finished = NULL;
-free(hostaddr);
-free(endaddr);
-free(netmask);
-xpc_release(if_desc);
-
-if (_open_port_vmnet_status != VMNET_SUCCESS) {
-  if (!_eth_running_as_root())
-    snprintf (errbuf, errbuf_size, "Failed to create vmnet connection for %s - %s.  You may need to run as root", savname, _vmnet_status_string(_open_port_vmnet_status));
-  else
-    snprintf (errbuf, errbuf_size, "Failed to create vmnet connection for %s - %s.", savname, _vmnet_status_string(_open_port_vmnet_status));
-  return SCPE_OPENERR;
-  }
-
-*eth_api = ETH_API_VMNET;
-*handle = (void *)vmn_interface;  /* Flag used to indicated open */
-return SCPE_OK;
-#else /* !defined(HAVE_VMNET_NETWORK) */
+#if !defined(USE_VMNET_HOST_AS_TAP)
 if (0 == strncmp("tap:", savname, 4)) {
   int  tun = -1;    /* TUN/TAP Socket */
   int  on = 1;
@@ -3076,7 +2939,7 @@ if (0 == strncmp("tap:", savname, 4)) {
           close(s);
           }
         }
-#endif
+#endif /* defined (__APPLE__) */
       }
     else
       strlcpy(errbuf, strerror(errno), errbuf_size);
@@ -3085,16 +2948,168 @@ if (0 == strncmp("tap:", savname, 4)) {
       tun = -1;
       }
     }
-#else
+#else /* !(defined(HAVE_BSDTUNTAP) && defined(HAVE_TAP_NETWORK)) */
   strlcpy(errbuf, "No support for tap: devices", errbuf_size);
-#endif /* !defined(__linux) && !defined(HAVE_BSDTUNTAP) */
-  if (0 == errbuf[0]) {
-    *eth_api = ETH_API_TAP;
-    *handle = (void *)1;  /* Flag used to indicated open */
-    return SCPE_OK;
+#endif /* !(defined(HAVE_BSDTUNTAP) && defined(HAVE_TAP_NETWORK)) */
+  }
+#endif /* !defined(USE_VMNET_HOST_AS_TAP) */
+/* Setting parameters on a vmnet SHARED interface doesn't actually   */
+/* work as described in the documentation.  If, in the future, it    */
+/* does, and the network block can actually be specified along with  */
+/* configuring inbound UDP and TCP port mapping, this can be enabled */
+/* along with implementing any then currently missing pieces.        */
+#if defined(HAVE_VMNET_NETWORK)
+xpc_object_t if_desc;
+dispatch_queue_t vmn_queue;
+interface_ref vmn_interface;
+char gbuf[CBUFSIZE];
+char *hostaddr = NULL;
+char *endaddr = NULL;
+char *netmask = NULL;
+
+if_desc = xpc_dictionary_create(NULL, NULL, 0);
+#if defined(USE_VMNET_SHARED_AS_NAT)
+if (0 == strncasecmp(savname, "nat:", 4)) {
+  NAT nat;
+  int err = 0;
+  
+  memset(&nat, 0, sizeof(NAT));
+  xpc_dictionary_set_uint64(if_desc, vmnet_operation_mode_key, VMNET_SHARED_MODE);
+  /* First, start with the original NAT default */
+  sim_nat_parse_args (&nat, "GATEWAY=10.0.2.2,MASKLEN=24,DHCP=10.0.2.15", ETH_API_VMNET, (char *)errbuf, sizeof(errbuf));
+  err = sim_nat_parse_args (&nat, &savname[4], ETH_API_VMNET, (char *)errbuf, sizeof(errbuf));
+  if (err == 0) {
+    if (nat.vdhcp_start.s_addr != INADDR_ANY)
+      hostaddr = strdup (inet_ntoa (nat.vdhcp_start));
+    if (nat.vdhcp_end.s_addr != INADDR_ANY)
+      endaddr = strdup (inet_ntoa (nat.vdhcp_end));
+    if (nat.vnetmask.s_addr != INADDR_ANY)
+      netmask = strdup (inet_ntoa (nat.vnetmask));
+    if (hostaddr)
+      xpc_dictionary_set_string(if_desc, vmnet_start_address_key, hostaddr);
+    if (endaddr)
+      xpc_dictionary_set_string(if_desc, vmnet_end_address_key, endaddr);
+    if (netmask)
+      xpc_dictionary_set_string(if_desc, vmnet_host_subnet_mask_key, netmask);
+    xpc_dictionary_set_bool(if_desc, vmnet_enable_isolation_key, TRUE);
     }
+  // Need NAT parameter parsing, TCP and UDP port allowances and setup
+  }
+else {
+#else /* !defined(USE_VMNET_SHARED_AS_NAT) */
+if (1) {
+#endif /* defined(USE_VMNET_SHARED_AS_NAT) */
+  if (0 == strncasecmp(savname, "tap:", 4)) {
+#if defined(USE_VMNET_HOST_AS_TAP)
+    const char *tptr = savname + 4;
+    unsigned char net_uuid[16];
+    NAT nat;
+    int err = 0;
+
+    memset(&nat, 0, sizeof(nat));
+    xpc_dictionary_set_uint64(if_desc, vmnet_operation_mode_key, VMNET_HOST_MODE);
+    tptr = get_glyph_nc (tptr, gbuf, ',');
+    _eth_tap_uuid (gbuf, net_uuid);
+    xpc_dictionary_set_uuid(if_desc, vmnet_network_identifier_key, net_uuid);
+    if ((tptr != NULL) && (*tptr != '\0')) {
+      err = sim_nat_parse_args (&nat, tptr, ETH_API_VMNET, (char *)errbuf, sizeof(errbuf));
+      if (err != 0) {
+        xpc_release(if_desc);
+        snprintf (errbuf, errbuf_size, "Error parsing vmnet tap: device parameters");
+        return SCPE_OPENERR;
+        }
+      if (nat.vgateway.s_addr != INADDR_ANY)
+        hostaddr = strdup (inet_ntoa (nat.vgateway));
+      if (nat.vnetmask.s_addr != INADDR_NONE)
+        netmask = strdup (inet_ntoa (nat.vnetmask));
+      if (((hostaddr != NULL) && (netmask == NULL)) ||
+          ((hostaddr == NULL) && (netmask != NULL))){
+        free(hostaddr);
+        free(endaddr);
+        free(netmask);
+        xpc_release(if_desc);
+        snprintf (errbuf, errbuf_size, "Both the HOSTIP and MASKLEN must be specified together vmnet host (tap:) device");
+        return SCPE_OPENERR;
+        }
+      if (hostaddr)
+        xpc_dictionary_set_string(if_desc, vmnet_host_ip_address_key, hostaddr);
+      if (netmask)
+        xpc_dictionary_set_string(if_desc, vmnet_host_subnet_mask_key, netmask);
+      }
+    }
+#else /* !defined(USE_VMNET_HOST_AS_TAP) */
+    free(hostaddr);
+    free(endaddr);
+    free(netmask);
+    strlcpy(errbuf, "No support for tap: devices", errbuf_size);
+    return SCPE_OPENERR;
+    }
+#endif /* !defined(USE_VMNET_HOST_AS_TAP) */
+  }
+else { // Bridged, so check if we've got a reasonable device name
+
+  xpc_object_t interface_list = vmnet_copy_shared_interface_list();
+  int i, interface_count = xpc_array_get_count(interface_list);
+
+  for (i=0; i<interface_count; i++) {
+    xpc_object_t element = xpc_array_get_value(interface_list, i);
+
+    if (0 == strcmp(savname, xpc_string_get_string_ptr(element)))
+      break;
+    }
+  if (i == interface_count) { /* Matching interface not found? */
+    free(hostaddr);
+    free(endaddr);
+    free(netmask);
+    xpc_release(if_desc);
+#if defined(USE_VMNET_HOST_AS_TAP)
+    snprintf (errbuf, errbuf_size, "%s is not a valid network specification.  You must specify either an appropriate vmnet bridged interface or a tap:", savname);
+#else /* !defined(USE_VMNET_HOST_AS_TAP) */
+    snprintf (errbuf, errbuf_size, "%s is not a valid network specification.  You must specify an appropriate vmnet bridged interface", savname);
+#endif /* !defined(USE_VMNET_HOST_AS_TAP) */
+    return SCPE_OPENERR;
+    }
+  xpc_dictionary_set_uint64(if_desc, vmnet_operation_mode_key, VMNET_BRIDGED_MODE);
+  xpc_dictionary_set_string(if_desc, vmnet_shared_interface_name_key, savname);
+  }
+
+vmn_queue = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+
+_open_port_vmnet_cb_finished = dispatch_semaphore_create(0);
+_open_port_opaque = opaque;
+
+vmn_interface = vmnet_start_interface(if_desc, vmn_queue, ^(vmnet_return_t status, xpc_object_t params)
+  {
+  _open_port_vmnet_status = status;
+  if (status == VMNET_SUCCESS) {
+      /* The logical device (bridge or otherwise) vmnet provides has its own MAC address which */
+      /* becomes the host system's address from the simulator's point of view */
+    if (SCPE_OK == eth_mac_scan (&((ETH_DEV*)_open_port_opaque)->host_nic_phy_hw_addr, xpc_dictionary_get_string(params, vmnet_mac_address_key)))
+      ((ETH_DEV*)_open_port_opaque)->have_host_nic_phy_addr = 1;
+    }
+  dispatch_semaphore_signal(_open_port_vmnet_cb_finished);
+  });
+
+dispatch_semaphore_wait(_open_port_vmnet_cb_finished, DISPATCH_TIME_FOREVER);
+dispatch_release(_open_port_vmnet_cb_finished);
+_open_port_vmnet_cb_finished = NULL;
+free(hostaddr);
+free(endaddr);
+free(netmask);
+xpc_release(if_desc);
+
+if (_open_port_vmnet_status != VMNET_SUCCESS) {
+  if (!_eth_running_as_root())
+    snprintf (errbuf, errbuf_size, "Failed to create vmnet connection for %s - %s.  You may need to run as root", savname, _vmnet_status_string(_open_port_vmnet_status));
+  else
+    snprintf (errbuf, errbuf_size, "Failed to create vmnet connection for %s - %s.", savname, _vmnet_status_string(_open_port_vmnet_status));
   return SCPE_OPENERR;
   }
+
+*eth_api = ETH_API_VMNET;
+*handle = (void *)vmn_interface;  /* Flag used to indicated open */
+return SCPE_OK;
+#else /* !defined(HAVE_VMNET_NETWORK) */
 if (0 == strncmp("vde:", savname, 4)) {
 #if defined(HAVE_VDE_NETWORK)
   if (eth_vde_network_available) {
@@ -3453,7 +3468,16 @@ static char version[300] = "";
 if (version[0] != '\0')
   return version;
 #if defined(HAVE_VMNET_NETWORK)
- strlcat (version, "PCAP(vmnet - bridged), TAP(vmnet - host)", sizeof (version));
+ strlcat (version, "PCAP(vmnet - bridged)", sizeof (version));
+#if defined(USE_VMNET_HOST_AS_TAP)
+ strlcat (version, ", TAP(vmnet - host)", sizeof (version));
+#else /* !defined(USE_VMNET_HOST_AS_TAP) */
+#if defined(HAVE_TAP_NETWORK)
+if (version[0] != '\0')
+  strlcat (version, ", ", sizeof (version));
+strlcat (version, "TAP", sizeof (version));
+#endif
+#endif /* !defined(USE_VMNET_HOST_AS_TAP) */
 #if defined(USE_VMNET_SHARED_AS_NAT)
  strlcat (version, ", NAT(vmnet - shared), UDP", sizeof (version));
 #else /* !defined(USE_VMNET_SHARED_AS_NAT) */

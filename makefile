@@ -971,6 +971,9 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
           DONT_USE_VMNET = $(shell if ${TEST} $(macOSMinor) -lt 15; then echo DONT_USE_VMNET; fi)
         else
           DONT_USE_VMNET = $(shell if ${TEST} $(macOSMajor) -lt 10; then echo DONT_USE_VMNET; fi)
+          ifeq (,$(DONT_USE_VMNET))
+            DONT_USE_VMNET_HOST = $(shell if ${TEST} $(macOSMajor) -lt 11; then echo DONT_USE_VMNET_HOST; fi)
+          endif
         endif
       endif
     endif
@@ -978,6 +981,9 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
       # sim_ether reduces network features to the appropriate minimal set
       NETWORK_LAN_FEATURES += VMNET
       NETWORK_CCDEFS += -DUSE_SHARED -I slirp -I slirp_glue -I slirp_glue/qemu -DHAVE_VMNET_NETWORK
+      ifneq (,$(DONT_USE_VMNET_HOST))
+        NETWORK_CCDEFS += -DDONT_USE_VMNET_HOST
+      endif
       NETWORK_DEPS += slirp/*.c slirp_glue/*.c
       NETWORK_LDFLAGS += -framework vmnet
       $(info using vmnet: $(call find_include,vmnet.framework/Headers/vmnet))
