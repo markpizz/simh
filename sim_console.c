@@ -4345,7 +4345,7 @@ char command[128];
 char response[256] = "";
 FILE *f;
 
-snprintf (command, sizeof (command), "ps -p %d | grep -E 'gdb|lldb|LLDB'", (int)getppid());
+snprintf (command, sizeof (command), "ps | grep %d | grep -E 'gdb|lldb|LLDB'", (int)getppid());
 f = popen (command, "r");
 if (f != NULL) {
     if (fgets(response, sizeof(response), f))
