@@ -6799,7 +6799,7 @@ else {
     }
 
 if ((*cptr == 0) || (*cptr == ';') || (*cptr == '#')) { /* now eol? */
-    return (lvl == MTAB_VDV)?
+    return ((lvl&MTAB_VDV) == MTAB_VDV)?
         show_device (ofile, dptr, 0):
         show_unit (ofile, dptr, uptr, -1);
     }
@@ -10019,7 +10019,7 @@ tmxr_flush_log_files ();
 t_stat
 flush_svc (UNIT *uptr)
 {
-sim_activate_after (uptr, sim_flush_interval * 1000000);
+sim_activate_after_d (uptr, sim_flush_interval * 1000000.0);
 sim_flush_buffered_files (FALSE);
 return SCPE_OK;
 }
@@ -10224,7 +10224,7 @@ if (signal (SIGTERM, int_handler) == SIG_ERR) {         /* set WRU */
     }
 if (sim_step)                                           /* set step timer */
     sim_sched_step ();
-sim_activate_after (&sim_flush_unit, sim_flush_interval * 1000000);/* Enable periodic buffer flushing */
+sim_activate_after_d (&sim_flush_unit, sim_flush_interval * 1000000.0);/* Enable periodic buffer flushing */
 stop_cpu = FALSE;
 sim_is_running = TRUE;                                  /* flag running */
 fflush(stdout);                                         /* flush stdout */
