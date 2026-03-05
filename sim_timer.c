@@ -101,6 +101,10 @@
 uint32 sim_idle_ms_sleep (unsigned int msec);
 static uint32 _sim_os_msec (void);
 
+/* sim_idle_ms_sleep uses pthread_cond_timedwait() which needs a absolute */
+/* end time that determines the timeout.  CLOCK_REALTIME gives us that.   */
+static int idle_clock = CLOCK_REALTIME; 
+
 /* MS_MIN_GRANULARITY exists here so that timing behavior for hosts systems  */
 /* with slow clock ticks can be assessed and tested without actually having  */
 /* that slow a clock tick on the development platform                        */
@@ -167,6 +171,10 @@ static uint32 sim_os_clock_resoluton_ms = 0;
 static uint32 sim_os_tick_hz = 0;
 static uint32 sim_idle_stable = SIM_IDLE_STDFLT;
 static uint32 sim_idle_calib_pct = 100;
+static int32  sim_idle_backward_jumps = 0;
+static double sim_idle_backward_total = 0.0; 
+static int32  sim_idle_forward_jumps = 0;
+static double sim_idle_forward_total = 0.0; 
 static double sim_timer_stop_time = 0;
 static uint32 sim_rom_delay = 0;
 static uint32 sim_throt_ms_start = 0;
@@ -249,6 +257,9 @@ UNIT * volatile sim_wallclock_entry = NULL;
 
 /* Forward Declarations */
 
+static double _timespec_to_double (struct timespec *time);
+static void _double_to_timespec (struct timespec *time, double dtime);
+
 t_stat sim_timer_set_async (int32 flag, CONST char *cptr);
 t_stat sim_timer_set_catchup (int32 flag, CONST char *cptr);
 t_stat sim_timer_set_calib (int32 flag, CONST char *cptr);
@@ -307,33 +318,46 @@ return sim_os_sleep_min_ms;
 #if defined(SIM_ASYNCH_IO)
 uint32 sim_idle_ms_sleep (unsigned int msec)
 {
-struct timespec start_time, end_time, done_time, delta_time;
-uint32 delta_ms;
+struct timespec end_time, timeout_time;
+double start_time, delta_ms;
 t_bool timedout = FALSE;
 
-clock_gettime(CLOCK_REALTIME, &start_time);
-end_time = start_time;
-end_time.tv_sec += (msec/1000);
-end_time.tv_nsec += 1000000*(msec%1000);
-if (end_time.tv_nsec >= 1000000000) {
-  end_time.tv_sec += end_time.tv_nsec/1000000000;
-  end_time.tv_nsec = end_time.tv_nsec%1000000000;
+clock_gettime(idle_clock, &timeout_time);
+start_time = _timespec_to_double (&timeout_time);
+timeout_time.tv_sec += (msec/1000);
+timeout_time.tv_nsec += 1000000*(msec%1000);
+if (timeout_time.tv_nsec >= 1000000000) {
+  timeout_time.tv_sec += timeout_time.tv_nsec/1000000000;
+  timeout_time.tv_nsec = timeout_time.tv_nsec%1000000000;
   }
 pthread_mutex_lock (&sim_asynch_lock);
 sim_idle_wait = TRUE;
-if (pthread_cond_timedwait (&sim_asynch_wake, &sim_asynch_lock, &end_time))
+if (pthread_cond_timedwait (&sim_asynch_wake, &sim_asynch_lock, &timeout_time))
     timedout = TRUE;
 sim_idle_wait = FALSE;
 pthread_mutex_unlock (&sim_asynch_lock);
 if (!timedout)
     sim_asynch_check = 0;                 /* force check of asynch queue now */
-clock_gettime(CLOCK_REALTIME, &done_time);
+clock_gettime(idle_clock, &end_time);
 if (!timedout) {
     AIO_UPDATE_QUEUE;
     }
-sim_timespec_diff (&delta_time, &done_time, &start_time);
-delta_ms = (uint32)((delta_time.tv_sec * 1000) + ((delta_time.tv_nsec + 500000) / 1000000));
-return delta_ms;
+delta_ms = (_timespec_to_double (&end_time) - start_time) * 1000.0;
+/* a NTP or other system time adjustment might have taken place   */
+/* while we were sleeping.  If time moved forward, we limit the   */
+/* returned value to 10x the requested sleep time.  If time moved */
+/* backwards, the return value is 0.                               */
+if (delta_ms < 0.0) {
+    ++sim_idle_backward_jumps;
+    sim_idle_backward_total += delta_ms;
+    return 0;
+    }
+if (delta_ms > 10.0 * msec) {
+    ++sim_idle_forward_jumps;
+    sim_idle_forward_total += delta_ms;
+    return (uint32)(10 * msec);
+    }
+return (uint32)delta_ms;
 }
 #else
 uint32 sim_idle_ms_sleep (unsigned int msec)
@@ -472,8 +496,11 @@ int clock_gettime(int clk_id, struct timespec *tp)
 {
 uint32 secs, ns, tod[2], unixbase[2] = {0xd53e8000, 0x019db1de};
 
-if (clk_id != CLOCK_REALTIME)
-  return -1;
+if ((clk_id != CLOCK_REALTIME) || (clk_id != CLOCK_MONOTONIC) {
+    tp->tv_sec = 0;
+    tp->tv_nsec = 0;
+    return -1;
+    }
 
 sys$gettim (tod);                                       /* time 0.1usec */
 lib$subx(tod, unixbase, tod);                           /* convert to unix base */
@@ -520,7 +547,7 @@ const t_bool rtc_avail = TRUE;
 
 static uint32 _sim_os_msec (void)
 {
-return timeGetTime ();                      /* use Multi-Media time source */
+return (uint32)timeGetTime ();              /* use Multi-Media time source */
 }
 
 void sim_os_sleep (unsigned int sec)
@@ -607,13 +634,11 @@ const t_bool rtc_avail = TRUE;
 
 static uint32 _sim_os_msec (void)
 {
-struct timeval cur;
-struct timezone foo;
-uint32 msec;
+struct timespec ts;
 
-gettimeofday (&cur, &foo);
-msec = (((uint32) cur.tv_sec) * 1000) + (((uint32) cur.tv_usec) / 1000);
-return msec;
+if (clock_gettime (CLOCK_MONOTONIC, &ts) != 0)
+    return 0;
+return (uint32)((t_int64)(ts.tv_sec * 1000) + (t_int64)((ts.tv_nsec + 500000) / 1000000));
 }
 
 void sim_os_sleep (unsigned int sec)
@@ -704,7 +729,7 @@ return SCPE_OK;
 
 #endif
 
-/* If one hasn't been provided yet, then just stub it */
+/* If one has not been provided yet, then just stub it */
 #if defined(NEED_THREAD_PRIORITY)
 t_stat sim_os_set_thread_priority (int below_normal_above)
 {
@@ -741,8 +766,6 @@ while (diff->tv_nsec >= 1000000000) {
 
 /* Forward declarations */
 
-static double _timespec_to_double (struct timespec *time);
-static void _double_to_timespec (struct timespec *time, double dtime);
 static t_bool _rtcn_tick_catchup_check (RTC *rtc, int32 time);
 static void _rtcn_configure_calibrated_clock (int32 newtmr);
 static t_bool _sim_coschedule_cancel (UNIT *uptr);
@@ -1002,7 +1025,7 @@ if (new_rtime < rtc->rtime) {                       /* time running backwards? *
         rtc->clock_catchup_base_time = sim_timenow_double();
         rtc->calib_tick_time = 0.0;
         }
-    return rtc->currd;                              /* can't calibrate */
+    return rtc->currd;                              /* can not calibrate */
     }
 delta_rtime = new_rtime - rtc->rtime;               /* elapsed wtime */
 rtc->rtime = new_rtime;                             /* adv wall time */
@@ -1157,7 +1180,7 @@ do {
 if ((sim_os_clock_resoluton_ms != 0) && (sim_idle_rate_ms >= sim_os_clock_resoluton_ms))
     sim_os_tick_hz = 1000/(sim_os_clock_resoluton_ms * (sim_idle_rate_ms/sim_os_clock_resoluton_ms));
 else {
-    fprintf (stderr, "Can't properly determine host system clock capabilities.\n");
+    fprintf (stderr, "Can not properly determine host system clock capabilities.\n");
     fprintf (stderr, "Minimum Host Sleep Time:       %u ms\n", sim_os_sleep_min_ms);
     fprintf (stderr, "Minimum Host Sleep Incr Time:  %u ms\n", sim_os_sleep_inc_ms);
     fprintf (stderr, "Idle Rate Milliseconds:        %u ms\n", sim_idle_rate_ms);
@@ -1197,6 +1220,14 @@ if (sim_timer_calib_enabled)
 if (sim_idle_enab) {
     fprintf (st, "Idling:                         Enabled\n");
     fprintf (st, "Time before Idling starts:      %d seconds\n", sim_idle_stable);
+    if (sim_idle_backward_jumps) {
+        fprintf (st, "Backward Time Jumps while Idle: %d\n", sim_idle_backward_jumps);
+        fprintf (st, "Total Backward Adjustments:     %s milliseconds\n", sim_fmt_numeric (-sim_idle_backward_total));
+        }
+    if (sim_idle_forward_jumps) {
+        fprintf (st, "Forward Time Jumps while Idle:  %d\n", sim_idle_forward_jumps);
+        fprintf (st, "Total Forward Adjustments:      %s milliseconds\n", sim_fmt_numeric (sim_idle_forward_total));
+        }
     }
 if (sim_throt_type != SIM_THROT_NONE) {
     sim_show_throt (st, NULL, uptr, val, desc);
