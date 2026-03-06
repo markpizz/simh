@@ -69,7 +69,7 @@
 #define MM0_1134        0160557
 
 #define SOP_1140        (BUS_U|OPT_EIS|OPT_MMU)
-#define OPT_1140        (OPT_FIS|OPT_MMU)
+#define OPT_1140        (OPT_EIS|OPT_FIS|OPT_MMU)
 #define PSW_1140        0170377
 #define PAR_1140        0007777
 #define PDR_1140        0077516
