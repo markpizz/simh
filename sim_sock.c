@@ -163,6 +163,8 @@ typedef size_t socklen_t;
 typedef int (WSAAPI *getnameinfo_func) (const struct sockaddr *sa, socklen_t salen, char *host, size_t hostlen, char *serv, size_t servlen, int flags);
 static getnameinfo_func p_getnameinfo;
 
+#if !defined(AF_INET6) || defined(TEST_INFO_STUBS) || defined(_WIN32)
+
 static void    WSAAPI s_freeaddrinfo (struct addrinfo *ai)
 {
 struct addrinfo *a, *an;
@@ -383,6 +385,8 @@ if ((host) && (hostlen > 0)) {
     }
 return 0;
 }
+
+#endif /* !defined(AF_INET6) || defined(TEST_INFO_STUBS) || defined(_WIN32) */
 
 #if defined(_WIN32) || defined(__CYGWIN__)
 
@@ -675,7 +679,7 @@ if (c != NULL) {
     bits = strtoul (c + 1, &c1, 10);
     if ((bits == 0) || (bits > 128) || (*c1 != '\0'))
         return status;
-    if ((c - validate_addr) > sizeof (v_cpy) - 1)
+    if ((size_t)(c - validate_addr) > sizeof (v_cpy) - 1)
         return status;
     memcpy (v_cpy, validate_addr, c - validate_addr);   /* Copy everything before the / */
     v_cpy[c - validate_addr] = '\0';                    /* NUL terminate the result */
@@ -701,7 +705,7 @@ while ((*acl != '\0') && !done) {
     permit = (*acl == '+');
     cc = strchr (acl, ',');
     if (cc != NULL) {
-        if ((cc - acl) > sizeof (rule))
+        if ((size_t)(cc - acl) > sizeof (rule))
             break;                  /* Too big - error */
         memcpy (rule, acl + 1, cc - (acl + 1));
         rule[cc - (acl + 1)] = '\0';

@@ -640,7 +640,7 @@ return 0;
 static int
 _panel_establish_register_bits_collection (PANEL *panel)
 {
-size_t i, buf_data, buf_needed = 1, reg_count = 0, bit_reg_count = 0;
+size_t i, buf_data, buf_needed = 1;
 int cmd_stat, bits_count = 0;
 char *buf, *response = NULL;
 
@@ -753,7 +753,7 @@ struct stat statb;
 char *buf = NULL;
 int port;
 int cmd_stat;
-size_t i, device_num;
+size_t i, device_num = 0;
 char hostport[64];
 union {int i; char c[sizeof (int)]; } end_test;
 
@@ -1444,7 +1444,7 @@ if (!panel->reg_count) {
     }
 pthread_mutex_lock (&panel->io_command_lock);
 pthread_mutex_lock (&panel->io_lock);
-if (panel->reg_query_size != _panel_send (panel, panel->reg_query, panel->reg_query_size)) {
+if ((int)panel->reg_query_size != _panel_send (panel, panel->reg_query, panel->reg_query_size)) {
     pthread_mutex_unlock (&panel->io_lock);
     pthread_mutex_unlock (&panel->io_command_lock);
     return -1;
@@ -2571,7 +2571,6 @@ int sched_policy;
 struct sched_param sched_priority;
 char *buf = NULL;
 size_t buf_data = 0;
-unsigned int callback_count = 0;
 int cmd_stat;
 
 /*
@@ -2594,7 +2593,6 @@ pthread_mutex_lock (&p->io_lock);
 while ((p->sock != INVALID_SOCKET) &&
        (p->usecs_between_callbacks) &&
        (p->State != Error)) {
-    int interval = p->usecs_between_callbacks;
     int new_register = p->new_register;
 
     pthread_mutex_unlock (&p->io_lock);
