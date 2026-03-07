@@ -37,11 +37,13 @@ Any use of this codebase that changes the code to influence the behavior of
 the disk access activities provided by sim_disk.c and scp.c is free to do 
 that as long as anyone doing this is explicitly not licensed to any subsequent 
 changes to any part of the codebase in the master branch of the git repository
-(https://github.com/simh/simh) made by Mark Pizzolato after the LICENSE.txt 
-was added to the master branch of repository. Changes that qualify for this 
-restriction at least include: changing the behavior or default of 
-SET AUTOSIZE/NOAUTOSIZE, or any code in scp.c and sim_disk.c or any simulator 
-components that use the sim_disk routines.
+(https://github.com/simh/simh or any clones or copies thereof) made by Mark 
+Pizzolato after the LICENSE.txt was added to the master branch of repository. 
+Changes that qualify for this restriction at least include: changing the 
+behavior or default of SET AUTOSIZE/NOAUTOSIZE and SET AUTOZAP/NOAUTOZAP, 
+or any code in scp.c and sim_disk.c or any simulator components that use the 
+sim_disk routines including any effort in simulator components to change the 
+default sim_disk activities.
 
 All changes to the codebase in the master branch of the 
 https://github.com/simh/simh repository made by Mark Pizzolato after the 
