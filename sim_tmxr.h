@@ -117,6 +117,7 @@ typedef struct SERPORT *SERHANDLE;
 #define TMLN_SPD_76800_BPS     130 /* usec per character */
 #define TMLN_SPD_80000_BPS     125 /* usec per character */
 #define TMLN_SPD_115200_BPS     86 /* usec per character */
+#define TMLN_SPD_230400_BPS     43 /* usec per character */
 
 /* Internal struct */
 struct framer_data;

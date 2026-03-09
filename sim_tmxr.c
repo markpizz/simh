@@ -2803,6 +2803,7 @@ static struct {
     {"76800",   TMLN_SPD_76800_BPS},
     {"80000",   TMLN_SPD_80000_BPS},
     {"115200",  TMLN_SPD_115200_BPS},
+    {"230400",  TMLN_SPD_230400_BPS},
     {"0",       0}};                    /* End of List, last valid value */
 int nspeed;
 char speed[24];
