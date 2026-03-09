@@ -28,7 +28,7 @@
 #define SIM_REV_H_     0
 
 #ifndef SIM_MAJOR
-#define SIM_MAJOR       4
+#define SIM_MAJOR       5
 #endif
 #ifndef SIM_MINOR
 #define SIM_MINOR       0
@@ -41,7 +41,7 @@
 #endif
 
 #ifndef SIM_VERSION_MODE
-#define SIM_VERSION_MODE "Current"
+#define SIM_VERSION_MODE "Alpha"
 #endif
 
 #if defined(SIM_NEED_GIT_COMMIT_ID)

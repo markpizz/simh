@@ -1,7 +1,7 @@
 image:
-  - macos-bigsur
-  - Ubuntu1604
+  - Ubuntu1804
   - Visual Studio 2015
+  - macos-bigsur
 
 platform:
   - x86

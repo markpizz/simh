@@ -2106,7 +2106,7 @@ static int pcap_mac_if_vms(const char *AdapterName, unsigned char MACAddress[6])
 }
 #endif /* defined (__VMS) && !defined(__VAX) */
 
-#if SIM_MAJOR != 4
+#if SIM_MAJOR < 4
 static const char *sim_get_tool_path (const char *tool)
 {
 return tool;

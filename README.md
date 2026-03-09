@@ -113,6 +113,7 @@ Simulator binaries for x86 Linus, x86 macOS, and Windows for all recent changes 
 - SCP IF command supports RegEx comparisons.
 - Windows builds are supported running all versions of Microsoft Visual Studio, including the most recent VS2026.
 - All simulators build with full functionality and extended/simplified network support on illumos Open Indiana and Omni OS.
+- ZAPTYPE command removes metadata from disk container files which have it, AND for any disk container file (with or without metadata) if the -Z switch is specified, all trailing zero containing 512 byte blocks will be trimmed from the container.
 
 #### All simulators build cleanly under OpenVMS on ia64 systems.
 
@@ -144,9 +145,11 @@ Simulator binaries for x86 Linus, x86 macOS, and Windows for all recent changes 
 - VAX Unibus simulators (780, 750, 730, 8600, 8200) run DEC supplied diagnostics at the speed of the original systems and also run the privileged instruction diagnostic that was supported on the original systems.
 - Reliable emulation of TU58 devices in PDP11 and Unibus VAX systems and consistent console TU58 on the VAX730 and VAX750.
 
-### All relevant changes in Bob Supnik's simh v3.12-4 release have been merged into this repo
+### Ken Rector has implemented a GUI based Front Panel application for the SDS simulator.
 
-### Bill Beech has made significant enhancements and bug fixes to the SWTP simulators along with a new disk controller from Roberto Sancho Villa
+### All relevant changes in Bob Supnik's simh v3.12-4 release have been merged into this repo.
+
+### Bill Beech has made significant enhancements and bug fixes to the SWTP simulators along with a new disk controller from Roberto Sancho Villa.
 
 ### Patrick Linstruth has written a new Altair8800 simulator.
 
