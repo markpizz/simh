@@ -725,12 +725,17 @@ if (lp->loopback)
     return loop_read (lp, &(lp->rxb[i]), length);
 if (lp->serport)                                        /* serial port connection? */
     return sim_read_serial (lp->serport, &(lp->rxb[i]), length, &(lp->rbr[i]));
-else {
-    if (lp->framer)
-        return tmxr_framer_read (lp,  &(lp->rxb[i]), length);
-    else                                                    /* Telnet connection */
-        return sim_read_sock (lp->sock, &(lp->rxb[i]), length);
+if (lp->framer)
+    return tmxr_framer_read (lp,  &(lp->rxb[i]), length);
+if (lp->console) {
+    t_stat c = sim_poll_kbd ();
+
+    if (!(c & SCPE_KFLAG))
+        return 0;
+    lp->rxb[i] = (char)c;
+    return 1;
     }
+return sim_read_sock (lp->sock, &(lp->rxb[i]), length);
 }
 
 
@@ -1843,7 +1848,7 @@ if (lp->framer) {
 before_modem_bits = lp->modembits;
 lp->modembits |= bits_to_set;
 lp->modembits &= ~bits_to_clear;
-if ((lp->sock) || (lp->serport) || (lp->loopback)) {
+if ((lp->sock) || (lp->serport) || (lp->loopback) || (lp->console)) {
     if (lp->modembits & TMXR_MDM_DTR) {
         incoming_state = TMXR_MDM_DSR;
         if (lp->modembits & TMXR_MDM_RTS)
@@ -2197,7 +2202,7 @@ TMLN *lp;
 tmxr_debug_trace (mp, "tmxr_poll_rx()");
 for (i = 0; i < mp->lines; i++) {                       /* loop thru lines */
     lp = mp->ldsc + i;                                  /* get line desc */
-    if (!(lp->sock || lp->serport || lp->loopback || lp->framer) ||
+    if (!(lp->sock || lp->serport || lp->loopback || lp->framer || lp->console) ||
         !(lp->rcve))                                    /* skip if not connected */
         continue;
 
@@ -3694,8 +3699,10 @@ if ((line < 0) || (line >= mp->lines))
 if (mp->ldsc[line].uptr)
     mp->ldsc[line].uptr->dynflags &= ~UNIT_TM_POLL;
 mp->ldsc[line].uptr = uptr_poll;
-if (uptr_poll->tmxr)                /* associated with a TMXR? */
+if (uptr_poll->tmxr) {              /* associated with a TMXR? */
     mp->ldsc[line].uptr->dynflags |= UNIT_TM_POLL;
+    mp->ldsc[line].uptr->flags |= UNIT_IDLE;
+    }
 return SCPE_OK;
 }
 
@@ -3714,7 +3721,7 @@ return SCPE_OK;
 
       - This routine must be called before the MUX is attached.
       - Only devices which poll on a unit different from the unit provided
-        at MUX attach time need call this function ABD different from the
+        at MUX attach time need call this function AND different from the
         unit which polls for input.  Calling this API is necessary for
         asynchronous multiplexer support and if speed limited behaviors are
         desired.
@@ -3729,8 +3736,10 @@ if ((line < 0) || (line >= mp->lines))
 if (mp->ldsc[line].o_uptr)
     mp->ldsc[line].o_uptr->dynflags &= ~UNIT_TM_POLL;
 mp->ldsc[line].o_uptr = uptr_poll;
-if (uptr_poll->tmxr)                /* associated with a TMXR? */
+if (uptr_poll->tmxr) {              /* associated with a TMXR? */
     mp->ldsc[line].o_uptr->dynflags |= UNIT_TM_POLL;
+    mp->ldsc[line].o_uptr->flags |= UNIT_IDLE;
+    }
 return SCPE_OK;
 }
 
@@ -3758,10 +3767,15 @@ extern TMXR sim_con_tmxr;
 
 if ((rxuptr == NULL) || (txuptr == NULL))
     return sim_messagef (SCPE_IERR, "tmxr_set_console_units() must specify non NULL receive and transmit units\n");
-if (sim_con_tmxr.uptr)
+/* Remove prior console unit associations */
+if (sim_con_tmxr.uptr) {
     sim_con_tmxr.uptr->dynflags &= ~UNIT_TM_POLL;
-if (sim_con_tmxr.ldsc->o_uptr)
+    sim_con_tmxr.uptr->tmxr = NULL;
+    }
+if (sim_con_tmxr.ldsc->o_uptr) {
     sim_con_tmxr.ldsc->o_uptr->dynflags &= ~UNIT_TM_POLL;
+    sim_con_tmxr.ldsc->o_uptr->tmxr = NULL;
+    }
 rxuptr->tmxr = &sim_con_tmxr;
 txuptr->tmxr = &sim_con_tmxr;
 tmxr_set_line_unit (&sim_con_tmxr, 0, rxuptr);
@@ -3932,9 +3946,10 @@ if (uptr->filename == NULL)                             /* avoid dangling NULL p
 uptr->flags = uptr->flags | UNIT_ATT;                   /* no more errors */
 uptr->tmxr = (void *)mp;
 if ((mp->lines > 1) ||
-    ((mp->master == 0) &&
+    ((mp->master == 0)             &&
      (mp->ldsc[0].connecting == 0) &&
-     (mp->ldsc[0].serport == 0)))
+     (mp->ldsc[0].serport == 0)    &&
+     (mp->ldsc[0].console == 0)))
     uptr->dynflags = uptr->dynflags | UNIT_ATTMULT;     /* allow multiple attach commands */
 
 uptr->dynflags |= UNIT_TM_POLL;                         /* tag as polling unit */
