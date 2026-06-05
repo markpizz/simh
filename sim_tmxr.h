@@ -66,9 +66,13 @@ typedef struct SERPORT *SERHANDLE;
 #define TMXR_DTR_DROP_TIME 500                          /* milliseconds to drop DTR for 'pseudo' modem control */
 #define TMXR_MODEM_RING_TIME 3                          /* seconds to wait for DTR for incoming connections */
 #define TMXR_DEFAULT_CONNECT_POLL_INTERVAL 1            /* seconds between connection polls */
+#define TMXR_MAX_IDLELOOP_INSTRUCTIONS 64               /* Maximum instruction value that defines a "tight" */
+                                                        /* loop which describes an simulator idle waiting for input */
 
 #define TMXR_DBG_XMT    0x00100000                       /* Debug Transmit Data */
 #define TMXR_DBG_RCV    0x00200000                       /* Debug Received Data */
+#define TMXR_DBG_POLL   0x00080000                       /* Debug Receive Data Polling */
+#define TMXR_DBG_IDLE   0x00040000                       /* Debug Receive Data Idling */
 #define TMXR_DBG_RET    0x00400000                       /* Debug Returned Received Data */
 #define TMXR_DBG_MDM    0x00800000                       /* Debug Modem Signals */
 #define TMXR_DBG_CFG    0x01000000                       /* Debug Line Configuration Activities */
@@ -175,6 +179,7 @@ struct tmln {
     uint32              rxpbsize;                       /* rcv packet buffer size */
     uint32              rxpboffset;                     /* rcv packet buffer offset */
     uint32              rxbps;                          /* rcv bps speed (0 - unlimited) */
+    double              rxlastemptycheck;               /* rcv last time getc_ln() return 0 */
     double              bpsfactor;                      /* receive speed factor (scaled to usecs) */
 #define USECS_PER_SECOND 1000000.0
     uint32              rxdeltausecs;                   /* rcv inter character min time (usecs) */
@@ -229,6 +234,7 @@ struct tmxr {
     int32               sessions;                       /* count of tcp connections received */
     uint32              poll_interval;                  /* frequency of connection polls (seconds) */
     uint32              last_poll_time;                 /* time of last connection poll */
+    uint32              idle_loop_instructions;         /* number of instructions in an idle loop */
     uint32              ring_start_time;                /* time ring signal was raised */
     char                *ring_ipad;                     /* incoming connection address awaiting DTR */
     SOCKET              ring_sock;                      /* incoming connection socket awaiting DTR */
@@ -256,6 +262,7 @@ int32 tmxr_send_buffered_data (TMLN *lp);
 t_stat tmxr_open_master (TMXR *mp, CONST char *cptr);
 t_stat tmxr_close_master (TMXR *mp);
 t_stat tmxr_connection_poll_interval (TMXR *mp, uint32 seconds);
+t_stat tmxr_set_idle_loop_instructions (TMXR *mp, uint32 instructions);
 t_stat tmxr_attach (TMXR *mp, UNIT *uptr, CONST char *cptr);
 #define tmxr_attach_ex(mp, uptr, cptr, async) tmxr_attach (mp, uptr, cptr)
 t_stat tmxr_detach (TMXR *mp, UNIT *uptr);
@@ -333,6 +340,8 @@ void _tmxr_debug (uint32 dbits, TMLN *lp, const char *msg, char *buf, int bufsiz
 #define tmxr_debug(dbits, lp, msg, buf, bufsize) do {if (sim_deb && (lp)->mp && (lp)->mp->dptr && ((dbits) & (lp)->mp->dptr->dctrl)) _tmxr_debug (dbits, lp, msg, buf, bufsize); } while (0)
 #define tmxr_debug_msg(dbits, lp, msg) do {if (sim_deb && (lp)->mp && (lp)->mp->dptr && ((dbits) & (lp)->mp->dptr->dctrl)) sim_debug (dbits, (lp)->mp->dptr, "%s", msg); } while (0)
 #define tmxr_debug_return(lp, val) do {if (sim_deb && (val) && (lp)->mp && (lp)->mp->dptr && (TMXR_DBG_RET & (lp)->mp->dptr->dctrl)) { if ((lp)->rxbps) sim_debug (TMXR_DBG_RET, (lp)->mp->dptr, "Ln%d: 0x%x - Next after: %.0f\n", (int)((lp)-(lp)->mp->ldsc), val, (lp)->rxnexttime); else sim_debug (TMXR_DBG_RET, (lp)->mp->dptr, "Ln%d: 0x%x\n", (int)((lp)-(lp)->mp->ldsc), val); } } while (0)
+#define tmxr_debug_poll(lp) do {if (sim_deb && (lp)->mp && (lp)->mp->dptr && (TMXR_DBG_POLL & (lp)->mp->dptr->dctrl)) { if ((lp)->rxbps) sim_debug (TMXR_DBG_POLL, (lp)->mp->dptr, "Ln%d: 0 - Next after: %.0f\n", (int)((lp)-(lp)->mp->ldsc), (lp)->rxnexttime); else sim_debug (TMXR_DBG_POLL, (lp)->mp->dptr, "Ln%d: 0 - new poll start\n", (int)((lp)-(lp)->mp->ldsc)); } } while (0)
+#define tmxr_debug_idle(lp) do {if (sim_deb && (lp)->mp && (lp)->mp->dptr && (TMXR_DBG_IDLE & (lp)->mp->dptr->dctrl)) { if ((lp)->rxbps) sim_debug (TMXR_DBG_IDLE, (lp)->mp->dptr, "Ln%d: 0 - Next after: %.0f\n", (int)((lp)-(lp)->mp->ldsc), (lp)->rxnexttime); else sim_debug (TMXR_DBG_IDLE, (lp)->mp->dptr, "Ln%d: 0 - idling\n", (int)((lp)-(lp)->mp->ldsc)); } } while (0)
 #define tmxr_debug_trace(mp, msg) do {if (sim_deb && (mp)->dptr && (TMXR_DBG_TRC & (mp)->dptr->dctrl)) sim_debug (TMXR_DBG_TRC, mp->dptr, "%s\n", (msg)); } while (0)
 #define tmxr_debug_trace_line(lp, msg) do {if (sim_deb && (lp)->mp && (lp)->mp->dptr && (TMXR_DBG_TRC & (lp)->mp->dptr->dctrl)) sim_debug (TMXR_DBG_TRC, (lp)->mp->dptr, "Ln%d:%s\n", (int)((lp)-(lp)->mp->ldsc), (msg)); } while (0)
 #define tmxr_debug_connect(mp, msg) do {if (sim_deb && (mp)->dptr && (TMXR_DBG_CON & (mp)->dptr->dctrl)) sim_debug (TMXR_DBG_CON, mp->dptr, "%s\n", (msg)); } while (0)

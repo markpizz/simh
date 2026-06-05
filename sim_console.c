@@ -199,6 +199,7 @@ t_bool sim_signaled_int_char                            /* WRU character detecte
 #endif
 uint32 sim_last_poll_kbd_time;                          /* time when sim_poll_kbd was called */
 extern TMLN *sim_oline;                                 /* global output socket */
+int32 sim_idle_loop_instructions = 0;                   /* Console or TMXR line poll that is an idle loop */
 static uint32 sim_con_pos;                              /* console character output count */
 
 static t_stat sim_con_poll_svc (UNIT *uptr);                /* console connection poll routine */
@@ -213,6 +214,8 @@ UNIT sim_con_units[2] = {{ UDATA (&sim_con_poll_svc, UNIT_ATTABLE, 0)}}; /* cons
 #define DBG_TRC  TMXR_DBG_TRC                           /* trace routine calls */
 #define DBG_XMT  TMXR_DBG_XMT                           /* display Transmitted Data */
 #define DBG_RCV  TMXR_DBG_RCV                           /* display Received Data */
+#define DBG_POLL TMXR_DBG_POLL                          /* display Received Poll 0 results */
+#define DBG_IDLE TMXR_DBG_IDLE                          /* display Received Poll Idling */
 #define DBG_RET  TMXR_DBG_RET                           /* display Returned Received Data */
 #define DBG_CON  TMXR_DBG_CON                           /* display connection activity */
 #define DBG_EXP  0x00000001                             /* Expect match activity */
@@ -224,6 +227,8 @@ static DEBTAB sim_con_debug[] = {
   {"SET",    DBG_SET, "settings call values"},
   {"XMT",    DBG_XMT, "Transmitted Data"},
   {"RCV",    DBG_RCV, "Received Data"},
+  {"POLL",   DBG_POLL,"Received Data Empty Poll"},
+  {"IDLE",   DBG_IDLE,"Received Data Idling"},
   {"RET",    DBG_RET, "Returned Received Data"},
   {"CON",    DBG_CON, "connection activity"},
   {"EXP",    DBG_EXP, "Expect match activity"},
@@ -343,6 +348,8 @@ static CTAB set_con_tab[] = {
     { "DBGINT",  &sim_set_kmap, KMAP_DBGINT | KMAP_NZ },
     { "DBGSIGNAL", &sim_set_dbgsignal, 0 },
     { "NODBGSIGNAL", &sim_reset_dbgsignal, 0 },
+    { "IDLELOOP", &sim_set_idleloop, 1 },
+    { "NOIDLELOOP", &sim_set_idleloop, 0 },
     { NULL, NULL, 0 }
     };
 
@@ -374,6 +381,7 @@ static SHTAB show_con_tab[] = {
     { "RESPONSE", &sim_show_cons_send_input, -1 },
     { "DELAY", &sim_show_cons_expect, -1 },
     { "DBGSIGNAL", &sim_show_dbgsignal, 0 },
+    { "IDLELOOP", &sim_show_idleloop, 0 },
     { NULL, NULL, 0 }
     };
 
@@ -3014,6 +3022,37 @@ fprintf(st, "Debugger interrupt not supported on this platform.\n");
 return SCPE_OK;
 }
 
+/* Specify the number of instructions that are considered an idle loop. */
+t_stat sim_set_idleloop (int32 flag, CONST char *cptr)
+{
+t_stat r = SCPE_OK;
+
+if (flag) { /* IDLELOOP */
+    int32 val;
+
+    if (!cptr || !*cptr)
+        return SCPE_2FARG;
+    val = (int) get_uint (cptr, 10, TMXR_MAX_IDLELOOP_INSTRUCTIONS, &r);
+    if (r != SCPE_OK)
+        return sim_messagef (r, "Invalid IdleLoop value '%s', Maximum is: %d\n", cptr, TMXR_MAX_IDLELOOP_INSTRUCTIONS);
+    sim_idle_loop_instructions = val;
+    }
+else {      /* NOIDLELOOP */
+    if (cptr && (*cptr))
+        return SCPE_ARG;
+    sim_idle_loop_instructions = 0;
+    }
+sim_con_tmxr.idle_loop_instructions = sim_idle_loop_instructions;
+return r;
+}
+
+t_stat sim_show_idleloop (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr)
+{
+if (sim_idle_loop_instructions != 0)
+    fprintf(st, "Console or Mux polling every %d instructions is considered an idle state.\n", sim_idle_loop_instructions);
+return SCPE_OK;
+}
+
 /* Poll for character */
 
 t_stat sim_poll_kbd (void)
@@ -3024,8 +3063,10 @@ sim_last_poll_kbd_time = sim_os_msec ();                    /* record when this 
 if (sim_send_poll_data (&sim_con_send, &c))                 /* injected input characters available? */
     return c;
 if (!sim_rem_master_mode) {
+    double sim_gtime_now = sim_gtime ();
+
     if ((sim_con_ldsc.rxbps) &&                             /* rate limiting && */
-        (sim_gtime () < sim_con_ldsc.rxnexttime))           /* too soon? */
+        (sim_gtime_now < sim_con_ldsc.rxnexttime))          /* too soon? */
         return SCPE_OK;                                     /* not yet */
     if (sim_ttisatty ())
         c = sim_os_poll_kbd ();                             /* get character */
@@ -3035,11 +3076,31 @@ if (!sim_rem_master_mode) {
         stop_cpu = TRUE;                                    /* Force a stop (which is picked up by sim_process_event */
         return SCPE_OK;
         }
+    if ((!sim_processing_event)                         &&
+        (c == SCPE_OK)                                  &&  /* No character? */
+        (sim_con_tmxr.idle_loop_instructions != 0)) {
+        if (sim_gtime_now > (sim_con_ldsc.rxlastemptycheck + sim_con_tmxr.idle_loop_instructions)) {
+            sim_con_ldsc.rxlastemptycheck = sim_gtime_now;
+            sim_debug (DBG_POLL, &sim_con_telnet, "sim_poll_kbd() initial returning: 0\n");
+            }
+        else {
+            t_bool idled;
+
+            sim_debug (DBG_IDLE, &sim_con_telnet, "sim_poll_kbd() idling when the instruction loop is %d\n", (int)(sim_gtime_now - sim_con_ldsc.rxlastemptycheck));
+            idled = sim_timer_idle (0);
+            sim_con_ldsc.rxlastemptycheck = sim_gtime();
+            if (idled)
+                sim_debug (DBG_IDLE, &sim_con_telnet, "sim_poll_kbd() idling slept instead of executing %d instructions\n", (int)(sim_con_ldsc.rxlastemptycheck - sim_gtime_now));
+            else
+                sim_debug (DBG_IDLE, &sim_con_telnet, "sim_poll_kbd() idling skipped due to other pending activity\n");
+            }
+        }
+
     if ((sim_con_tmxr.master == 0) &&                       /* not Telnet? */
         (sim_con_ldsc.serport == 0)) {                      /* and not serial? */
         if (c && sim_con_ldsc.rxbps)                        /* got something && rate limiting? */
             sim_con_ldsc.rxnexttime =                       /* compute next input time */
-                floor (sim_gtime () + ((sim_con_ldsc.rxdeltausecs * sim_timer_inst_per_sec ()) / USECS_PER_SECOND));
+                floor (sim_gtime_now + ((sim_con_ldsc.rxdeltausecs * sim_timer_inst_per_sec ()) / USECS_PER_SECOND));
         if (c)
             sim_debug (DBG_RCV, &sim_con_telnet, "sim_poll_kbd() returning: '%c' (0x%02X)\n", sim_isprint (c & 0xFF) ? c & 0xFF : '.', c);
         return c;                                           /* in-window */
@@ -3099,7 +3160,7 @@ if (!sim_con_ldsc.console      &&                       /* Non Console */
 if (tmxr_txdone_ln (&sim_con_ldsc) == 0) {
     if (sim_con_ldsc.txbps)                             /* rate limiting? */
         sim_con_ldsc.o_uptr->wait =                     /* Long poll to allow proper scheduling*/
-            (int32)((2 * TMLN_SPD_50_BPS * sim_timer_inst_per_sec ()) / USECS_PER_SECOND);
+            (int32)((sim_con_ldsc.txdeltausecs * sim_timer_inst_per_sec ()) / USECS_PER_SECOND);
     else
         sim_con_ldsc.o_uptr->wait = SERIAL_OUT_WAIT;    /* "standard" output wait */
     return SCPE_STALL;
@@ -3112,7 +3173,8 @@ if (r == SCPE_OK)
     ++sim_con_pos;                                      /* bookkeeping */
 tmxr_poll_tx (&sim_con_tmxr);                           /* poll xmt */
 if (sim_con_ldsc.txbps)                                 /* rate limiting? */
-    sim_con_ldsc.o_uptr->wait = 0;                      /* next one 0 wait */
+    sim_con_ldsc.o_uptr->wait = 
+         (int32)(sim_con_ldsc.txnexttime - sim_gtime());/* next one when due */
 else
     sim_con_ldsc.o_uptr->wait = SERIAL_OUT_WAIT;        /* "standard" output wait */
 return r;                                               /* return status */

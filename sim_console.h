@@ -95,6 +95,7 @@ t_stat sim_set_cons_noexpect (int32 flg, CONST char *cptr);
 t_stat sim_set_pchar (int32 flag, CONST char *cptr);
 t_stat sim_set_cons_speed (int32 flag, CONST char *cptr);
 t_stat sim_set_dbgsignal (int32 flag, CONST char *cptr);
+t_stat sim_set_idleloop (int32 flag, CONST char *cptr);
 t_stat sim_reset_dbgsignal (int32 flag, CONST char *cptr);
 t_stat sim_show_console (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr);
 t_stat sim_show_remote_console (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr);
@@ -109,6 +110,7 @@ t_stat sim_show_cons_log (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST 
 t_stat sim_show_cons_debug (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr);
 t_stat sim_show_cons_expect (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr);
 t_stat sim_show_dbgsignal (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr);
+t_stat sim_show_idleloop (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr);
 t_stat sim_check_console (int32 sec);
 t_stat sim_open_logfile (const char *filename, t_bool binary, FILE **pf, FILEREF **pref);
 t_stat sim_close_logfile (FILEREF **pref);
@@ -144,6 +146,7 @@ extern int32 sim_tt_pchar;              /* printable character mask */
 extern int32 sim_del_char;              /* delete character */
 extern t_bool sim_signaled_int_char;    /* WRU character detected by signal while running  */
 extern uint32 sim_last_poll_kbd_time;   /* time when sim_poll_kbd was called */
+extern int32 sim_idle_loop_instructions;/* console or mux poll interval that indicates an idle state */
 
 #ifdef  __cplusplus
 }

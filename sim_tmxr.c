@@ -1066,6 +1066,7 @@ mp->poll_interval = seconds;
 return SCPE_OK;
 }
 
+
 /* Poll for new connection
 
    Called from unit service routine to test for new connection
@@ -1104,6 +1105,8 @@ if (mp->last_poll_time == 0) {                          /* first poll initializa
 
     if (mp->poll_interval == 0)                         /* Assure reasonable polling interval */
         mp->poll_interval = TMXR_DEFAULT_CONNECT_POLL_INTERVAL;
+
+    mp->idle_loop_instructions = sim_idle_loop_instructions;
 
     for (i=0; i < mp->lines; i++) {
         if (mp->ldsc[i].uptr) {
@@ -2115,6 +2118,21 @@ if (val) {                                              /* Got something? */
         lp->rxnexttime = floor (sim_gtime_now + ((lp->rxdeltausecs * sim_timer_inst_per_sec ()) / USECS_PER_SECOND));
     else
         lp->rxnexttime = floor (sim_gtime_now + ((lp->mp->uptr->wait * sim_timer_inst_per_sec ()) / USECS_PER_SECOND));
+    }
+else {
+    if ((!sim_processing_event)             &&
+        (lp->mp != NULL)                    && 
+        (lp->mp->idle_loop_instructions != 0)) {
+        if (sim_gtime_now > (lp->rxlastemptycheck + lp->mp->idle_loop_instructions)) {
+            lp->rxlastemptycheck = sim_gtime_now;
+            tmxr_debug_poll(lp);
+            }
+        else {
+            tmxr_debug_idle(lp);
+            sim_timer_idle (0);
+            lp->rxlastemptycheck = sim_gtime();
+            }
+        }
     }
 tmxr_debug_return(lp, val);
 return val;
@@ -3946,9 +3964,9 @@ if (uptr->filename == NULL)                             /* avoid dangling NULL p
 uptr->flags = uptr->flags | UNIT_ATT;                   /* no more errors */
 uptr->tmxr = (void *)mp;
 if ((mp->lines > 1) ||
-    ((mp->master == 0)             &&
+    ((mp->master == 0) &&
      (mp->ldsc[0].connecting == 0) &&
-     (mp->ldsc[0].serport == 0)    &&
+     (mp->ldsc[0].serport == 0) && 
      (mp->ldsc[0].console == 0)))
     uptr->dynflags = uptr->dynflags | UNIT_ATTMULT;     /* allow multiple attach commands */
 
@@ -4012,6 +4030,8 @@ if (mp->modem_control)
     fprintf(st, ", ModemControl=enabled");
 if (mp->buffered)
     fprintf(st, ", Buffered=%d", mp->buffered);
+if (mp->idle_loop_instructions)
+    fprintf(st, ", IdleLoop %u instructions", sim_idle_loop_instructions);
 for (j = 1; j < mp->lines; j++)
     if (o_uptr != mp->ldsc[j].o_uptr)
         break;
