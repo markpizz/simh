@@ -607,6 +607,12 @@ static const char *_get_runlimit (void);
 /* Global data */
 
 const char *sim_prog_name = NULL;                       /* pointer to the executable name */
+const char *sim_version_date_stamp =                    /* source code or build time */
+#if defined (SIM_GIT_COMMIT_TIME)
+                                __STR(SIM_GIT_COMMIT_TIME);
+#else
+                                __DATE__ " " __TIME__;
+#endif
 DEVICE *sim_dflt_dev = NULL;
 UNIT *sim_clock_queue = QUEUE_LIST_END;
 int32 sim_interval = 0;
@@ -7438,7 +7444,7 @@ if (1) {
         while ((c = strstr (c, "  ")))
             memmove (c, c+1, strlen (c));
 #endif
-        if ((f = popen ("uname -a | sed 's/,//g'", "r"))) {
+        if ((f = popen ("uname -srvmo | sed 's/,//g'", "r"))) {
             memset (osversion, 0, sizeof (osversion));
             do {
                 if (NULL == fgets (osversion, sizeof (osversion)-1, f))
