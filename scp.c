@@ -608,10 +608,10 @@ static const char *_get_runlimit (void);
 
 const char *sim_prog_name = NULL;                       /* pointer to the executable name */
 const char *sim_version_date_stamp =                    /* source code or build time */
-#if defined (SIM_GIT_COMMIT_TIME)
+#if defined (SIM_GIT_COMMIT_TIME) && !defined (SIM_GIT_UNCOMMITTED_CHANGES)
                                 __STR(SIM_GIT_COMMIT_TIME);
 #else
-                                __DATE__ " " __TIME__;
+                                __DATE__ " at " __TIME__;
 #endif
 DEVICE *sim_dflt_dev = NULL;
 UNIT *sim_clock_queue = QUEUE_LIST_END;
@@ -7289,11 +7289,21 @@ if (1) {
 #else
     cpp = "C";
 #endif
-#if !defined (SIM_BUILD_OS)
-    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s", cpp, arch, build, __DATE__, __TIME__);
-#else
-    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s %s", cpp, arch, build, __DATE__, __TIME__, __STR(SIM_BUILD_OS));
 #endif
+#if !defined (SIM_GIT_UNCOMMITTED_CHANGES)
+if (1) {
+    struct stat fstat;
+
+    if (!sim_stat (sim_prog_name, &fstat))
+        fprintf (st, "\n        Simulator Compiled as %s%s%s on (or downloaded) at %s", cpp, arch, build, ctime (&fstat.st_mtime));
+    else
+        fprintf (st, "\n        Simulator Compiled as %s%s%s on %s", cpp, arch, build, sim_version_date_stamp);
+    }
+#else
+    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s", cpp, arch, build, sim_version_date_stamp);
+#endif
+#if defined (SIM_BUILD_OS)
+    fprintf (st, " %s", __STR(SIM_BUILD_OS));
 #endif
 #if defined (SIM_BUILD_TOOL)
     fprintf (st, "\n        Build Tool: %s", __STR(SIM_BUILD_TOOL));
