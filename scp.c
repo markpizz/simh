@@ -607,6 +607,12 @@ static const char *_get_runlimit (void);
 /* Global data */
 
 const char *sim_prog_name = NULL;                       /* pointer to the executable name */
+const char *sim_version_date_stamp =                    /* source code or build time */
+#if defined (SIM_GIT_COMMIT_TIME) && !defined (SIM_GIT_UNCOMMITTED_CHANGES)
+                                __STR(SIM_GIT_COMMIT_TIME);
+#else
+                                __DATE__ " at " __TIME__;
+#endif
 DEVICE *sim_dflt_dev = NULL;
 UNIT *sim_clock_queue = QUEUE_LIST_END;
 int32 sim_interval = 0;
@@ -7184,9 +7190,15 @@ const char *cpp = "";
 const char *build = "";
 const char *arch = "";
 FILE *saved_st = st;
+t_bool only_reproducible_factors = ((sim_switches & SWMASK ('R')) != 0);
 
 if (cptr && (*cptr != 0))
     return SCPE_2MARG;
+#if !defined (SIM_GIT_COMMIT_TIME) || defined (SIM_GIT_UNCOMMITTED_CHANGES) || defined(_DEBUG)
+if (only_reproducible_factors && (strchr (__STR(SIM_ARCHIVE_GIT_COMMIT_ID), '$') != NULL))
+    return sim_messagef (SCPE_ARG, "This build is not expected to be reproducible\n");
+#endif
+
 sprintf (vmaj_s, "%d", vmaj);
 setenv ("SIM_MAJOR", vmaj_s, 1);
 sprintf (vmin_s, "%d", vmin);
@@ -7228,7 +7240,8 @@ if (1) {
     fprintf (st, "\n        %s", eth_capabilities());
     setenv ("SIM_ETHERNET_CAPABILITIES", eth_capabilities(), 1);
     idle_capable = sim_timer_idle_capable (&os_ms_sleep_1, &os_tick_size);
-    fprintf (st, "\n        Idle/Throttling support is %savailable", idle_capable ? "" : "NOT ");
+    if (!only_reproducible_factors)
+        fprintf (st, "\n        Idle/Throttling support is %savailable", idle_capable ? "" : "NOT ");
     if (sim_disk_vhd_support())
         fprintf (st, "\n        Virtual Hard Disk (VHD) support");
     if (sim_disk_raw_support())
@@ -7283,11 +7296,24 @@ if (1) {
 #else
     cpp = "C";
 #endif
-#if !defined (SIM_BUILD_OS)
-    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s", cpp, arch, build, __DATE__, __TIME__);
-#else
-    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s %s", cpp, arch, build, __DATE__, __TIME__, __STR(SIM_BUILD_OS));
 #endif
+#if !defined (SIM_GIT_UNCOMMITTED_CHANGES)
+if (1) {
+    struct stat fstat;
+
+    if (!sim_stat (sim_prog_name, &fstat)) {
+        if (!only_reproducible_factors)
+            fprintf (st, "\n        Simulator Compiled as %s%s%s on (or downloaded) at %s", cpp, arch, build, ctime (&fstat.st_mtime));
+        }
+    else
+        fprintf (st, "\n        Simulator Compiled as %s%s%s on %s", cpp, arch, build, sim_version_date_stamp);
+    }
+#else
+    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s", cpp, arch, build, sim_version_date_stamp);
+#endif
+#if defined (SIM_BUILD_OS)
+    if (!only_reproducible_factors)
+        fprintf (st, " %s", __STR(SIM_BUILD_OS));
 #endif
 #if defined (SIM_BUILD_TOOL)
     fprintf (st, "\n        Build Tool: %s", __STR(SIM_BUILD_TOOL));
@@ -7302,8 +7328,10 @@ if (1) {
         fprintf (st, "\n        PCRE RegEx (Version %s) support for EXPECT and IF commands", pcre_version());
     else
         fprintf (st, "\n        No RegEx support for EXPECT or IF commands");
-    fprintf (st, "\n        OS clock resolution: %dms", os_tick_size);
-    fprintf (st, "\n        Time taken by msleep(1): %dms", os_ms_sleep_1);
+    if (!only_reproducible_factors) {
+        fprintf (st, "\n        OS clock resolution: %dms", os_tick_size);
+        fprintf (st, "\n        Time taken by msleep(1): %dms", os_ms_sleep_1);
+        }
     if (sim_editline_version != 0) {
         if (sim_editline_version > 0xFFFF)
             fprintf (st, "\n        WinEditLine Version: %d.%d%02X", sim_editline_version >> 16, (sim_editline_version >> 8) & 0xFF, sim_editline_version & 0xFF);
@@ -7389,9 +7417,11 @@ if (1) {
         if (isdigit (cores[0]))
             setenv ("SIM_HOST_CORE_COUNT", cores, 1);
         setenv ("SIM_HOST_MAX_THREADS", procs, 1);
-        fprintf (st, "\n        OS: %s", osversion);
-        fprintf (st, "\n        Architecture: %s%s%s, %s%s%sLogical Processors: %s", arch, proc_arch3264 ? " on " : "", proc_arch3264 ? proc_arch3264  : "", (cores[0] == '\0') ? "" : "Cores: ", cores, (cores[0] == '\0') ? "" : ", ", procs);
-        fprintf (st, "\n        Processor Id: %s, Level: %s, Revision: %s", proc_id ? proc_id : "", proc_level ? proc_level : "", proc_rev ? proc_rev : "");
+        if (!only_reproducible_factors) {
+            fprintf (st, "\n        OS: %s", osversion);
+            fprintf (st, "\n        Architecture: %s%s%s, %s%s%sLogical Processors: %s", arch, proc_arch3264 ? " on " : "", proc_arch3264 ? proc_arch3264  : "", (cores[0] == '\0') ? "" : "Cores: ", cores, (cores[0] == '\0') ? "" : ", ", procs);
+            fprintf (st, "\n        Processor Id: %s, Level: %s, Revision: %s", proc_id ? proc_id : "", proc_level ? proc_level : "", proc_rev ? proc_rev : "");
+            }
         if ((proc_name[0] == '\0') && (wmicpath[0] != '\0')) {
             if ((f = _popen ("WMIC CPU GET NAME", "r"))) {
                 memset (proc_name, 0, sizeof(proc_name));
@@ -7405,20 +7435,22 @@ if (1) {
                 _pclose (f);
                 }
             }
-        if (proc_name[0] != '\0')
-            fprintf (st, "\n        Processor Name: %s", proc_name);
-        strlcpy (os_type, "Windows", sizeof (os_type));
-        if (tarversion[0] == '\0')
-            strlcpy (tarversion, _get_tool_version ("tar"), sizeof (tarversion));
-        if (tarversion[0] != '\0') {
-            fprintf (st, "\n        tar tool: %s", tarversion);
-            setenv ("SIM_TAR_CMD_AVAILABLE", "TRUE", 1);
-            }
-        if (curlversion[0] == '\0')
-            strlcpy (curlversion, _get_tool_version ("curl"), sizeof (curlversion));
-        if (curlversion[0] != '\0') {
-            fprintf (st, "\n        curl tool: %s", curlversion);
-            setenv ("SIM_CURL_CMD_AVAILABLE", "TRUE", 1);
+        if (!only_reproducible_factors) {
+            if (proc_name[0] != '\0')
+                fprintf (st, "\n        Processor Name: %s", proc_name);
+            strlcpy (os_type, "Windows", sizeof (os_type));
+            if (tarversion[0] == '\0')
+                strlcpy (tarversion, _get_tool_version ("tar"), sizeof (tarversion));
+            if (tarversion[0] != '\0') {
+                fprintf (st, "\n        tar tool: %s", tarversion);
+                setenv ("SIM_TAR_CMD_AVAILABLE", "TRUE", 1);
+                }
+            if (curlversion[0] == '\0')
+                strlcpy (curlversion, _get_tool_version ("curl"), sizeof (curlversion));
+            if (curlversion[0] != '\0') {
+                fprintf (st, "\n        curl tool: %s", curlversion);
+                setenv ("SIM_CURL_CMD_AVAILABLE", "TRUE", 1);
+                }
             }
         }
 #else
@@ -7438,7 +7470,7 @@ if (1) {
         while ((c = strstr (c, "  ")))
             memmove (c, c+1, strlen (c));
 #endif
-        if ((f = popen ("uname -a | sed 's/,//g'", "r"))) {
+        if ((f = popen ("uname -srvmo | sed 's/,//g'", "r"))) {
             memset (osversion, 0, sizeof (osversion));
             do {
                 if (NULL == fgets (osversion, sizeof (osversion)-1, f))
@@ -7468,28 +7500,33 @@ if (1) {
             memmove (osname, osname+1, strlen(osname));
         if ((osname[0] != '\0') && (osname[strlen(osname)-1] == '"'))
             osname[strlen(osname)-1] = '\0';
-        if (osname[0] != '\0')
-            fprintf (st, "\n        Operating System: %s", osname);
-        else {
-            if ((f = popen ("sw_vers -ProductVersion 2>/dev/null", "r"))) {
-                memset (osname, 0, sizeof (osname));
-                do {
-                    if (NULL == fgets (osname, sizeof (osname)-1, f))
-                        break;
-                    sim_trim_endspc (osname);
-                    } while (osname[0] == '\0');
-                pclose (f);
-                }
+        if (!only_reproducible_factors) {
             if (osname[0] != '\0')
-                fprintf (st, "\n        Operating System: macOS %s", osname);
+                fprintf (st, "\n        Operating System: %s", osname);
+            else {
+                if ((f = popen ("sw_vers -ProductVersion 2>/dev/null", "r"))) {
+                    memset (osname, 0, sizeof (osname));
+                    do {
+                        if (NULL == fgets (osname, sizeof (osname)-1, f))
+                            break;
+                        sim_trim_endspc (osname);
+                        } while (osname[0] == '\0');
+                    pclose (f);
+                    }
+                if (osname[0] != '\0')
+                    fprintf (st, "\n        Operating System: macOS %s", osname);
+                }
             }
 #if defined(SIM_BUILD_OS_VERSION)
-        if (strcmp(osversion, buildosversion) != 0) {
-            fprintf (st, "\n        Built on OS: %s", buildosversion);
-            run_context = "Running on ";
+        if (!only_reproducible_factors) {
+            if (strcmp(osversion, buildosversion) != 0) {
+                fprintf (st, "\n        Built on OS: %s", buildosversion);
+                run_context = "Running on ";
+                }
             }
 #endif
-        fprintf (st, "\n        %sOS: %s", run_context, osversion);
+        if (!only_reproducible_factors)
+            fprintf (st, "\n        %sOS: %s", run_context, osversion);
         if ((f = popen ("uname", "r"))) {
             memset (os_type, 0, sizeof (os_type));
             do {
@@ -7529,19 +7566,21 @@ if (1) {
                     }
                 } while ((arch[0] == '\0') || (proc_name[0] == '\0') || (procs[0] == '\0') || (cores[0] == '\0'));
             pclose (f);
-            if (proc_name[0] != '\0')
-                fprintf (st, "\n        Processor Name: %s", proc_name);
-            if ((arch[0] != '\0') || (procs[0] != '\0') || (cores[0] != '\0'))
-                fprintf (st, "\n        ");
-            if (arch[0] != '\0')
-                fprintf (st, "Architecture: %s", arch);
-            if (cores[0] != '\0') {
-                fprintf (st, ", Cores: %s", cores);
-                setenv ("SIM_HOST_CORE_COUNT", cores, 1);
-                }
-            if (procs[0] != '\0') {
-                fprintf (st, ", Logical Processors: %s", procs);
-                setenv ("SIM_HOST_MAX_THREADS", procs, 1);
+            if (!only_reproducible_factors) {
+                if (proc_name[0] != '\0')
+                    fprintf (st, "\n        Processor Name: %s", proc_name);
+                if ((arch[0] != '\0') || (procs[0] != '\0') || (cores[0] != '\0'))
+                    fprintf (st, "\n        ");
+                if (arch[0] != '\0')
+                    fprintf (st, "Architecture: %s", arch);
+                if (cores[0] != '\0') {
+                    fprintf (st, ", Cores: %s", cores);
+                    setenv ("SIM_HOST_CORE_COUNT", cores, 1);
+                    }
+                if (procs[0] != '\0') {
+                    fprintf (st, ", Logical Processors: %s", procs);
+                    setenv ("SIM_HOST_MAX_THREADS", procs, 1);
+                    }
                 }
             }
 #elif defined (__APPLE__)
@@ -7569,17 +7608,19 @@ if (1) {
                     }
                 } while ((proc_name[0] == '\0') || (cores[0] == '\0') || (procs[0] == '\0'));
             pclose (f);
-            if (proc_name[0] != '\0')
-                fprintf (st, "\n        Processor Name: %s", proc_name);
-            if ((procs[0] != '\0') || (cores[0] != '\0'))
-                fprintf (st, "\n        ");
-            if (cores[0] != '\0') {
-                fprintf (st, "Cores: %s", cores);
-                setenv ("SIM_HOST_CORE_COUNT", cores, 1);
-                }
-            if (procs[0] != '\0') {
-                fprintf (st, ", Logical Processors: %s", procs);
-                setenv ("SIM_HOST_MAX_THREADS", procs, 1);
+            if (!only_reproducible_factors) {
+                if (proc_name[0] != '\0')
+                    fprintf (st, "\n        Processor Name: %s", proc_name);
+                if ((procs[0] != '\0') || (cores[0] != '\0'))
+                    fprintf (st, "\n        ");
+                if (cores[0] != '\0') {
+                    fprintf (st, "Cores: %s", cores);
+                    setenv ("SIM_HOST_CORE_COUNT", cores, 1);
+                    }
+                if (procs[0] != '\0') {
+                    fprintf (st, ", Logical Processors: %s", procs);
+                    setenv ("SIM_HOST_MAX_THREADS", procs, 1);
+                    }
                 }
             }
 #elif defined (__illumos__)
@@ -7614,35 +7655,39 @@ if (1) {
                     }
                 } while ((proc_name[0] == '\0') || (cores == 0) || (procs == 0));
             pclose (f);
-            if (proc_name[0] != '\0')
-                fprintf (st, "\n        Processor Name: %s", proc_name);
-            if ((procs != 0) || (cores != 0))
-                fprintf (st, "\n        ");
-            if (cores != 0) {
-                snprintf (line, sizeof (line), "%d", cores);
-                fprintf (st, "Cores: %s", line);
-                setenv ("SIM_HOST_CORE_COUNT", line, 1);
-                }
-            if (procs != 0) {
-                snprintf (line, sizeof (line), "%d", procs);
-                fprintf (st, "%sLogical Processors: %s", (cores != 0) ? ", " : "", line);
-                setenv ("SIM_HOST_MAX_THREADS", line, 1);
+            if (!only_reproducible_factors) {
+                if (proc_name[0] != '\0')
+                    fprintf (st, "\n        Processor Name: %s", proc_name);
+                if ((procs != 0) || (cores != 0))
+                    fprintf (st, "\n        ");
+                if (cores != 0) {
+                    snprintf (line, sizeof (line), "%d", cores);
+                    fprintf (st, "Cores: %s", line);
+                    setenv ("SIM_HOST_CORE_COUNT", line, 1);
+                    }
+                if (procs != 0) {
+                    snprintf (line, sizeof (line), "%d", procs);
+                    fprintf (st, "%sLogical Processors: %s", (cores != 0) ? ", " : "", line);
+                    setenv ("SIM_HOST_MAX_THREADS", line, 1);
+                    }
                 }
             }
 #endif
-        strlcpy (tarversion, _get_tool_version ("tar"), sizeof (tarversion));
-        if (tarversion[0]) {
-            fprintf (st, "\n        tar tool: %s", tarversion);
-            setenv ("SIM_TAR_CMD_AVAILABLE", "TRUE", 1);
-            }
-        strlcpy (curlversion, _get_tool_version ("curl"), sizeof (curlversion));
-        if (curlversion[0]) {
-            fprintf (st, "\n        curl tool: %s", curlversion);
-            setenv ("SIM_CURL_CMD_AVAILABLE", "TRUE", 1);
-            }
+        if (!only_reproducible_factors) {
+            strlcpy (tarversion, _get_tool_version ("tar"), sizeof (tarversion));
+            if (tarversion[0]) {
+                fprintf (st, "\n        tar tool: %s", tarversion);
+                setenv ("SIM_TAR_CMD_AVAILABLE", "TRUE", 1);
+                }
+            strlcpy (curlversion, _get_tool_version ("curl"), sizeof (curlversion));
+            if (curlversion[0]) {
+                fprintf (st, "\n        curl tool: %s", curlversion);
+                setenv ("SIM_CURL_CMD_AVAILABLE", "TRUE", 1);
+                }
 #if !defined(_WIN32)
-        fprintf (st, "\n        %s as root", _sim_running_as_root () ? "Running" : "Not running");
+            fprintf (st, "\n        %s as root", _sim_running_as_root () ? "Running" : "Not running");
 #endif
+            }
         }
 #endif
     if ((!strcmp (os_type, "Unknown")) && (getenv ("OSTYPE")))
