@@ -130,7 +130,10 @@ struct simh_disk_footer {
     uint8       FooterVersion;          /* Initially 0 */
 #define FOOTER_VERSION  1
     uint8       AccessFormat;           /* 1 - SIMH, 2 - RAW */
-    uint8       Reserved[342];          /* Currently unused */
+    uint8       CommitId[61];           /* simh git Commit Id creating the footer */
+    uint8       ArchiveCommitId[61];    /* simh Archive Commit Id creating the footer */
+    uint8       Interleave[4];          /* Interleave info in bytes (0-sector, 1-track, 2-cylinder, 3-unused*/
+    uint8       Reserved[216];          /* Currently unused */
     uint32      Geometry;               /* CHS (Cylinders, Heads and Sectors) */
     uint32      DataWidth;              /* Data Width in the Transfer Size */
     uint32      MediaID;                /* Media ID */
@@ -911,7 +914,13 @@ if ((sects == 1) &&                                     /* Single sector reads *
         *sectsread = 1;
     return SCPE_OK;                                     /* return success */
     }
-
+if (uptr->flags & UNIT_BUF) {
+    memcpy (buf, ((uint8 *)uptr->filebuf) + (lba * ctx->sector_size), sects * ctx->sector_size);
+    if (sectsread)
+        *sectsread = sects;
+    r = SCPE_OK;
+    return r;
+    }
 if ((0 == (ctx->sector_size & (ctx->storage_sector_size - 1))) ||   /* Sector Aligned & whole sector transfers */
     ((0 == ((lba*ctx->sector_size) & (ctx->storage_sector_size - 1))) &&
      (0 == ((sects*ctx->sector_size) & (ctx->storage_sector_size - 1)))) ||
@@ -1047,6 +1056,8 @@ sim_debug_unit (ctx->dbit, uptr, "sim_disk_wrsect(unit=%d, lba=0x%X, sects=%d)\n
 
 if (sectswritten)
     *sectswritten = 0;
+if (uptr->flags & UNIT_RO)
+    return SCPE_RO;
 ctx->write_count++;                                     /* record write operation */
 if (uptr->dynflags & UNIT_DISK_CHK) {
     DEVICE *dptr = find_dev_from_unit (uptr);
@@ -1077,63 +1088,70 @@ if (uptr->dynflags & UNIT_DISK_CHK) {
             }
         }
     }
-switch (f) {                                            /* case on format */
-    case DKUF_F_STD:                                    /* SIMH format */
-        r = _sim_disk_wrsect (uptr, lba, buf, &written, sects);
-        break;
-    case DKUF_F_VHD:                                    /* VHD format */
-        if (!sim_end && (ctx->xfer_encode_size != sizeof (char))) {
-            tbuf = (uint8*) malloc (sects * ctx->sector_size);
-            if (NULL == tbuf)
-                return SCPE_MEM;
-            sim_buf_copy_swapped (tbuf, buf, ctx->xfer_encode_size, (sects * ctx->sector_size) / ctx->xfer_encode_size);
-            buf = tbuf;
-            }
-        r = sim_vhd_disk_wrsect  (uptr, lba, buf, &written, sects);
-        break;
-    case DKUF_F_RAW:                                    /* Raw Physical Disk Access */
-        break;                                          /* handle below */
-    default:
-        return SCPE_NOFNC;
+if (uptr->flags & UNIT_BUF) {
+    memcpy (((uint8 *)uptr->filebuf) + (lba * ctx->sector_size), buf, sects * ctx->sector_size);
+    written = sects;
+    r = SCPE_OK;
     }
-if (f == DKUF_F_RAW) {
-    if ((0 == (ctx->sector_size & (ctx->storage_sector_size - 1))) ||   /* Sector Aligned & whole sector transfers */
-        ((0 == ((lba*ctx->sector_size) & (ctx->storage_sector_size - 1))) &&
-         (0 == ((sects*ctx->sector_size) & (ctx->storage_sector_size - 1))))) {
+else {
+    switch (f) {                                            /* case on format */
+        case DKUF_F_STD:                                    /* SIMH format */
+            r = _sim_disk_wrsect (uptr, lba, buf, &written, sects);
+            break;
+        case DKUF_F_VHD:                                    /* VHD format */
+            if (!sim_end && (ctx->xfer_encode_size != sizeof (char))) {
+                tbuf = (uint8*) malloc (sects * ctx->sector_size);
+                if (NULL == tbuf)
+                    return SCPE_MEM;
+                sim_buf_copy_swapped (tbuf, buf, ctx->xfer_encode_size, (sects * ctx->sector_size) / ctx->xfer_encode_size);
+                buf = tbuf;
+                }
+            r = sim_vhd_disk_wrsect  (uptr, lba, buf, &written, sects);
+            break;
+        case DKUF_F_RAW:                                    /* Raw Physical Disk Access */
+            break;                                          /* handle below */
+        default:
+            return SCPE_NOFNC;
+        }
+    if (f == DKUF_F_RAW) {
+        if ((0 == (ctx->sector_size & (ctx->storage_sector_size - 1))) ||   /* Sector Aligned & whole sector transfers */
+            ((0 == ((lba*ctx->sector_size) & (ctx->storage_sector_size - 1))) &&
+             (0 == ((sects*ctx->sector_size) & (ctx->storage_sector_size - 1))))) {
 
-        if (!sim_end && (ctx->xfer_encode_size != sizeof (char))) {
-            tbuf = (uint8*) malloc (sects * ctx->sector_size);
-            if (NULL == tbuf)
-                return SCPE_MEM;
-            sim_buf_copy_swapped (tbuf, buf, ctx->xfer_encode_size, (sects * ctx->sector_size) / ctx->xfer_encode_size);
-            buf = tbuf;
+            if (!sim_end && (ctx->xfer_encode_size != sizeof (char))) {
+                tbuf = (uint8*) malloc (sects * ctx->sector_size);
+                if (NULL == tbuf)
+                    return SCPE_MEM;
+                sim_buf_copy_swapped (tbuf, buf, ctx->xfer_encode_size, (sects * ctx->sector_size) / ctx->xfer_encode_size);
+                buf = tbuf;
+                }
+
+            r = sim_os_disk_wrsect (uptr, lba, buf, &written, sects);
             }
+        else { /* Unaligned and/or partial sector transfers in RAW mode */
+            size_t tbufsize = sects * ctx->sector_size + 2 * ctx->storage_sector_size;
+            t_offset ssaddr = (lba * (t_offset)ctx->sector_size) & ~(t_offset)(ctx->storage_sector_size -1);
+            t_offset sladdr = ((lba + sects) * (t_offset)ctx->sector_size) & ~(t_offset)(ctx->storage_sector_size -1);
+            uint32 soffset = (uint32)((lba * (t_offset)ctx->sector_size) - ssaddr);
+            uint32 byteswritten;
 
-        r = sim_os_disk_wrsect (uptr, lba, buf, &written, sects);
+            tbuf = (uint8*) malloc (tbufsize);
+            if (tbuf == NULL)
+                return SCPE_MEM;
+            /* Partial Sector writes require a read-modify-write sequence for the partial sectors */
+            if (soffset)
+                sim_os_disk_read (uptr, ssaddr, tbuf, NULL, ctx->storage_sector_size);
+            sim_os_disk_read (uptr, sladdr, tbuf + (size_t)(sladdr - ssaddr), NULL, ctx->storage_sector_size);
+            sim_buf_copy_swapped (tbuf + soffset,
+                                  buf, ctx->xfer_encode_size, (sects * ctx->sector_size) / ctx->xfer_encode_size);
+            r = sim_os_disk_write (uptr, ssaddr, tbuf, &byteswritten, (soffset + (sects * ctx->sector_size) + ctx->storage_sector_size - 1) & ~(ctx->storage_sector_size - 1));
+            written = byteswritten / ctx->sector_size;
+            if (written > sects)
+                written = sects;
+            }
         }
-    else { /* Unaligned and/or partial sector transfers in RAW mode */
-        size_t tbufsize = sects * ctx->sector_size + 2 * ctx->storage_sector_size;
-        t_offset ssaddr = (lba * (t_offset)ctx->sector_size) & ~(t_offset)(ctx->storage_sector_size -1);
-        t_offset sladdr = ((lba + sects) * (t_offset)ctx->sector_size) & ~(t_offset)(ctx->storage_sector_size -1);
-        uint32 soffset = (uint32)((lba * (t_offset)ctx->sector_size) - ssaddr);
-        uint32 byteswritten;
-
-        tbuf = (uint8*) malloc (tbufsize);
-        if (tbuf == NULL)
-            return SCPE_MEM;
-        /* Partial Sector writes require a read-modify-write sequence for the partial sectors */
-        if (soffset)
-            sim_os_disk_read (uptr, ssaddr, tbuf, NULL, ctx->storage_sector_size);
-        sim_os_disk_read (uptr, sladdr, tbuf + (size_t)(sladdr - ssaddr), NULL, ctx->storage_sector_size);
-        sim_buf_copy_swapped (tbuf + soffset,
-                              buf, ctx->xfer_encode_size, (sects * ctx->sector_size) / ctx->xfer_encode_size);
-        r = sim_os_disk_write (uptr, ssaddr, tbuf, &byteswritten, (soffset + (sects * ctx->sector_size) + ctx->storage_sector_size - 1) & ~(ctx->storage_sector_size - 1));
-        written = byteswritten / ctx->sector_size;
-        if (written > sects)
-            written = sects;
-        }
+    free (tbuf);
     }
-free (tbuf);
 if (sectswritten)
     *sectswritten = written;
 if (written > 0) {
@@ -1261,6 +1279,82 @@ do {
     } while ((sects != 0) && (status == SCPE_OK));
 
 return status;
+}
+
+static t_stat _sim_disk_process_interleave (UNIT *uptr, t_bool shutdown, uint8 *lba_data, uint8 *psa_data)
+{
+struct disk_context *ctx = (struct disk_context *)uptr->disk_ctx;
+uint32 offset, sectpertrack;
+uint32 interleave, skew;
+t_lba lba, psa;
+t_lba total_sectors = (t_lba)(ctx->container_size/ctx->sector_size);
+t_bool container_logical = FALSE;
+t_stat status = SCPE_OK;
+
+if (uptr->drvtyp == NULL)
+    return sim_messagef (SCPE_IERR, "%s: Missing Drive type\n", sim_uname (uptr));
+
+interleave = uptr->drvtyp->ilv_sect;
+skew = uptr->drvtyp->ilv_cyl;
+
+if (((ctx->data_ileave == 0) && 
+     (ctx->data_ileave_skew == 0)) &&
+    ((interleave == 0) &&
+     (skew == 0)))
+    return SCPE_OK;
+
+if ((interleave == 0) &&
+    (skew == 0))
+    return sim_messagef (SCPE_IERR, "%s: Interleaved File System, %s devices have no support for interleaving\n", sim_uname (uptr), uptr->dptr->name);
+
+sectpertrack = uptr->drvtyp->sect;
+offset = sectpertrack;
+
+if (((ctx->data_ileave != 0) && (interleave != ctx->data_ileave)) ||
+    ((ctx->data_ileave_skew != 0) && (skew != ctx->data_ileave_skew)))
+    return sim_messagef (SCPE_IERR, "%s: Inconsistent interleaved File System (%u, %u) and device (%u, %u) capabilities\n", sim_uname (uptr), ctx->data_ileave, ctx->data_ileave_skew, interleave, skew);
+
+if ((uptr->flags & UNIT_BUF) == 0)
+    return sim_messagef (SCPE_IERR, "%s: Interleave supported only for buffered unit\n", sim_uname (uptr));
+
+if ((ctx->data_ileave == 0) && 
+    (ctx->data_ileave_skew == 0)) {
+    container_logical = TRUE;
+    if (!shutdown)
+        sim_messagef (SCPE_OK, "%s: Container Data is Logical and physical data has interleaved sectors (sector: %d, track: %d)\n",  sim_uname (uptr), interleave, skew);
+    }
+else {
+    if (!shutdown)
+        sim_messagef (SCPE_OK, "%s: Container Data is Physical with interleaved sectors (sector: %d, track: %d)\n",  sim_uname (uptr), interleave, skew);
+    }
+
+for (lba = 0; lba < total_sectors; lba++) {
+    uint16 i, track, sector;
+
+    /*
+     * Map an LBA address into a physical sector address
+     */
+    track = lba / sectpertrack;
+    i = (lba % sectpertrack) * interleave;
+    if (i >= sectpertrack)
+        i++;
+    sector = (i + (track * skew)) % sectpertrack;
+
+    psa = (sector + (track * sectpertrack) + offset) % total_sectors;
+    if (!shutdown)
+        memcpy (psa_data + (psa * ctx->sector_size), lba_data + (lba * ctx->sector_size), ctx->sector_size);
+    else {
+        if ((ctx->data_ileave != 0) || 
+            (ctx->data_ileave_skew != 0))
+            memcpy (lba_data + (lba * ctx->sector_size), psa_data + (psa * ctx->sector_size), ctx->sector_size);
+        }
+    }
+
+if (shutdown && container_logical) {
+    memcpy (psa_data, lba_data, total_sectors * ctx->sector_size);
+    memset (lba_data, 0, total_sectors * ctx->sector_size);
+    }
+return SCPE_OK;
 }
 
 /*
@@ -3048,6 +3142,7 @@ time_t now = time (NULL);
 t_bool Fixed = FALSE;
 t_offset total_sectors;
 t_offset highwater;
+char *eptr;
 
 if ((dptr = find_dev_from_unit (uptr)) == NULL)
     return SCPE_NOATT;
@@ -3068,6 +3163,14 @@ if ((drvtyp != NULL) &&
 total_sectors = (drvtyp != NULL) ? (t_offset)drvtyp->size : (((t_offset)uptr->capac) * ctx->capac_factor * ((dptr->flags & DEV_SECTORS) ? ctx->sector_size : 1)) / ctx->sector_size;
 memcpy (f->Signature, "simh", 4);
 f->FooterVersion = FOOTER_VERSION;
+eptr = getenv ("SIM_GIT_COMMIT_ID");
+if (eptr != NULL)
+    strlcpy ((char *)f->CommitId, eptr, sizeof (f->CommitId));
+eptr = getenv ("SIM_ARCHIVE_GIT_COMMIT_ID");
+if (eptr != NULL)
+    strlcpy ((char *)f->ArchiveCommitId, eptr, sizeof (f->ArchiveCommitId));
+f->Interleave[0] = ctx->data_ileave;
+f->Interleave[2] = ctx->data_ileave_skew;
 memset (f->CreatingSimulator, 0, sizeof (f->CreatingSimulator));
 strlcpy ((char *)f->CreatingSimulator, sim_name, sizeof (f->CreatingSimulator));
 memset (f->DriveType, 0, sizeof (f->DriveType));
@@ -4132,14 +4235,22 @@ if (uptr->flags & UNIT_BUFABLE) {                       /* buffer in memory? */
             }
         }
     sim_messagef (SCPE_OK, "%s: buffering file in memory\n", sim_uname (uptr));
+    /* populate the buffer with the physical data from the file */
     r = sim_disk_rdsect (uptr, 0, (uint8 *)uptr->filebuf, &sectsread, (t_seccnt)(ctx->container_size / ctx->sector_size));
     if (r != SCPE_OK)
         return sim_disk_detach (uptr);
     uptr->hwmark = (sectsread * ctx->sector_size) / ctx->xfer_encode_size;
     memcpy (uptr->filebuf2, uptr->filebuf, (size_t)ctx->container_size);/* save initial contents */
     uptr->flags |= UNIT_BUF;                            /* mark as buffered */
-    if ((uptr->hwmark * ctx->xfer_encode_size) < current_unit_size)/* Make sure the container on disk has all the data (zero fill as needed) */
+    if (r == SCPE_OK)
+        r = _sim_disk_process_interleave (uptr, FALSE, uptr->filebuf2, uptr->filebuf);
+    if (r != SCPE_OK)
+        return sim_disk_detach (uptr);
+    if ((uptr->hwmark * ctx->xfer_encode_size) < current_unit_size) {/* Make sure the container on disk has all the data (zero fill as needed) */
+        uptr->flags &= ~UNIT_BUF;                       /* temporarily clear buffered */
         sim_disk_wrsect (uptr, 0, (uint8 *)uptr->filebuf, NULL, (t_seccnt)(current_unit_size / ctx->sector_size));
+        uptr->flags |= UNIT_BUF;                        /* restore mark as buffered */
+        }
     }
 if (DK_GET_FMT (uptr) != DKUF_F_STD)
     uptr->dynflags |= UNIT_NO_FIO;
@@ -4190,12 +4301,15 @@ if ((uptr->flags & UNIT_BUF) && (uptr->filebuf)) {
     uint32 cap = (uptr->hwmark + uptr->dptr->aincr - 1) / uptr->dptr->aincr;
     t_offset current_unit_size = ((t_offset)uptr->capac)*ctx->capac_factor*((uptr->dptr->flags & DEV_SECTORS) ? ctx->sector_size : 1);
 
+    _sim_disk_process_interleave (uptr, TRUE, uptr->filebuf2, uptr->filebuf);
+
     if (((uptr->flags & UNIT_RO) == 0) &&
         (memcmp (uptr->filebuf, uptr->filebuf2, (size_t)current_unit_size) != 0)) {
         sim_messagef (SCPE_OK, "%s: writing buffer to file: %s\n", sim_uname (uptr), uptr->filename);
+        uptr->flags &= ~UNIT_BUF;
         sim_disk_wrsect (uptr, 0, (uint8 *)uptr->filebuf, NULL, (cap + ctx->sector_size - 1) / ctx->sector_size);
         }
-    uptr->flags = uptr->flags & ~UNIT_BUF;
+    uptr->flags &= ~UNIT_BUF;
     }
 free (uptr->filebuf);                                   /* free buffers */
 uptr->filebuf = NULL;
@@ -7959,9 +8073,29 @@ if (info->flag == 0) {  /* DISKINFO */
                     uint32 CHS = NtoHl (f->Geometry);
 
                     sim_printf ("%s   Geometry:            %u Cylinders, %u Heads, %u Sectors\n", indent, CHS >> 16, (CHS >> 8) & 0xFF, CHS & 0xFF);
+                    if ((f->Interleave[0] != 0) || (f->Interleave[1] != 0) || (f->Interleave[2] != 0) || (f->Interleave[3] != 0)) {
+                        const char *sep = "";
+
+                        sim_printf ("%s   Interleave:          ", indent);
+                        if (f->Interleave[0] != 0) {
+                            sim_printf ("Sector Skew: %d", f->Interleave[0]);
+                            sep = ", ";
+                            }
+                        if (f->Interleave[1] != 0) {
+                            sim_printf ("%sTrack Skew: %d", sep, f->Interleave[1]);
+                            sep = ", ";
+                            }
+                        if (f->Interleave[2] != 0) 
+                            sim_printf ("%sCylinder Skew: %d", sep, f->Interleave[2]);
+                        sim_printf ("\n");
+                        }
                     }
                 if (highwater_sector > 0)
                     sim_printf ("%s   HighwaterSector:     %u\n", indent, (uint32)highwater_sector);
+                if (f->CommitId[0] != '\0')
+                    sim_printf ("%s   Creating Commit Id:  %s\n", indent, (char *)f->CommitId);
+                if (f->ArchiveCommitId[0] != '\0')
+                    sim_printf ("%s   Creating Archive Id: %s\n", indent, (char *)f->ArchiveCommitId);
                 sim_printf ("%sContainer Size: %s bytes\n", indent, sim_fmt_numeric ((double)ctx->container_size));
                 ctx->sector_size = NtoHl(f->SectorSize);
                 ctx->xfer_encode_size = NtoHl (f->ElementEncodingSize);

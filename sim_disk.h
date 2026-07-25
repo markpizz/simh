@@ -181,6 +181,9 @@ struct DRVTYP {
     const char *str_02;         /* #2 device specific string  */
     const char *str_03;         /* #3 device specific string */
     uint32      uint32_14;      /* #14 device specific parameter */
+    uint32      uint32_15;      /* #15 device specific parameter */
+    uint32      uint32_16;      /* #16 device specific parameter */
+    uint32      uint32_17;      /* #17 device specific parameter */
     };
 /* MSCP specific drive parameters */
 #define tpg     uint32_01       /* trk/grp */
@@ -202,6 +205,10 @@ struct DRVTYP {
 #define rev          str_03     /* SCSI revision string */
 #define gaplen  uint32_14       /* SCSI tape gap length */
 
+/* Interleave drive parameters */
+#define ilv_sect    uint32_15   /* Interleave Sector Skew */
+#define ilv_trk     uint32_16   /* Interleave Track Skew */
+#define ilv_cyl     uint32_17   /* Interleave Cylinder Skew */
 
 
 

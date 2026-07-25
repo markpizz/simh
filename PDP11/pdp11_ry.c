@@ -67,17 +67,24 @@
 #define RX02_NUMBY      256                             /* bytes/sector */
 #define RX_NUMDR        2                               /* drives/controller */
 #define RX_M_NUMDR      01
+#define RX_INTER        2                               /* 2 sector interleave */
+#define RX_ISKEW        6                               /* 6 sectors interleave per track */
+                                                        /* (aka cyl on a single surface devices) */
 
 #define RY_DRV(d,a)                                     \
   { RX_NUMSC, RX_NUMSF, RX_NUMTR, (RX_NUMSC * RX_NUMTR),\
-    #d,       d##_NUMBY, DRVFL_RMV,                   \
-    "DY",     0,        0,        #a }
+    #d,       d##_NUMBY, DRVFL_RMV,                     \
+    "DY",     0,        0,        #a, NULL, 0, 0, 0, 0, \
+    0, 0, 0, 8, 9, 10, 11, 12, 13, NULL, NULL, NULL,    \
+    0, RX_INTER, 0, RX_ISKEW}
+
 
 static DRVTYP drv_tab[] = {
     RY_DRV(RX01,SINGLE),
     RY_DRV(RX02,DOUBLE),
     { 0 }
     };
+
 
 #define IDLE            0                               /* idle state */
 #define RWDS            1                               /* rw, sect next */
