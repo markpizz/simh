@@ -318,7 +318,7 @@ if "%_X_SLN_VERSION%" == "10.00" copy /y "%_SLN_FILE%" "%_NEW_SLN_FILE%" >NUL & 
 if not "%_NEW_SLN_FILE%" == "" echo Project conversion completed at %TIME%
 set _NEW_SLN_FILE=
 if not "%_X_SLN_VERSION%" == "10.00" echo _SLN_FILE=%_SLN_FILE%
-if not "%_VC_VER%" == "2022" if not "%_VC_VER%" == "2026" goto _RunBuild
+if not "%_VC_VER%" == "2019" if not "%_VC_VER%" == "2022" if not "%_VC_VER%" == "2026" goto _RunBuild
 
 :_DoV141Convert
 set _X_PROJS_CONVERTED=
