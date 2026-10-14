@@ -183,6 +183,10 @@ PNG_ROUTINE(png_const_charp, zlibVersion,
 
 #define SIM_ASYNCH_CLOCKS 1
 
+#if defined(_WIN32)
+typedef int clockid_t;
+#endif /* defined(_WIN32) */
+extern clockid_t sim_idle_clock;
 extern pthread_mutex_t sim_asynch_lock;
 extern pthread_cond_t sim_asynch_wake;
 extern pthread_mutex_t sim_timer_lock;
@@ -209,20 +213,53 @@ extern int32 sim_asynch_inst_latency;
 /* It is primarily used only used in debugging messages */
 #define AIO_TLS
 #endif
+#if defined (HAS_PTHREAD_TIMEDWAIT_RELATIVE)
+#define AIO_CLOCK_OVERRIDE sim_idle_clock = CLOCK_MONOTONIC
+#else /* !defined (HAS_PTHREAD_TIMEDWAIT_RELATIVE) */
+#define AIO_CLOCK_OVERRIDE 
+#endif /* !defined (HAS_PTHREAD_TIMEDWAIT_RELATIVE) */
+#if defined (HAS_PTHREAD_COND_SETCLOCK)
 #define AIO_INIT                                                  \
     do {                                                          \
-      pthread_mutexattr_t attr;                                   \
+      pthread_mutexattr_t mattr;                                  \
+      pthread_condattr_t cattr;                                   \
                                                                   \
-      pthread_mutexattr_init (&attr);                             \
-      pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);  \
-      pthread_mutex_init (&sim_asynch_lock, &attr);               \
-      pthread_mutexattr_destroy (&attr);                          \
+      pthread_mutexattr_init (&mattr);                            \
+      pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_RECURSIVE); \
+      pthread_mutex_init (&sim_asynch_lock, &mattr);              \
+      pthread_mutexattr_destroy (&mattr);                         \
+      pthread_condattr_init (&cattr);                             \
+      sim_idle_clock = CLOCK_MONOTONIC;                           \
+      if (pthread_condattr_setclock(&cattr, sim_idle_clock))      \
+        sim_idle_clock = CLOCK_REALTIME;                          \
+      pthread_cond_init (&sim_asynch_wake, &cattr);               \
+      pthread_condattr_destroy (&cattr);                          \
+      sim_asynch_main_threadid = pthread_self();                  \
+      /* Empty list/list end uses the point value (void *)1.      \
+         This allows NULL in an entry's a_next pointer to         \
+         indicate that the entry is not currently in any list */  \
+      sim_asynch_queue = QUEUE_LIST_END;                          \
+      AIO_CLOCK_OVERRIDE;                                         \
+      } while (0)
+#else /* !defined (HAS_PTHREAD_COND_SETCLOCK) */
+#define AIO_INIT                                                  \
+    do {                                                          \
+      pthread_mutexattr_t mattr;                                  \
+                                                                  \
+      pthread_mutexattr_init (&mattr);                            \
+      pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_RECURSIVE); \
+      pthread_mutex_init (&sim_asynch_lock, &mattr);              \
+      pthread_mutexattr_destroy (&mattr);                         \
+      sim_idle_clock = CLOCK_REALTIME;                            \
+      pthread_cond_init (&sim_asynch_wake, NULL);                 \
+      AIO_CLOCK_OVERRIDE;                                         \
       sim_asynch_main_threadid = pthread_self();                  \
       /* Empty list/list end uses the point value (void *)1.      \
          This allows NULL in an entry's a_next pointer to         \
          indicate that the entry is not currently in any list */  \
       sim_asynch_queue = QUEUE_LIST_END;                          \
       } while (0)
+#endif /* !defined (HAS_PTHREAD_COND_SETCLOCK) */
 #define AIO_CLEANUP                                               \
     do {                                                          \
       pthread_mutex_destroy(&sim_asynch_lock);                    \

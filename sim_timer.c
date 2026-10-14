@@ -102,8 +102,15 @@ uint32 sim_idle_ms_sleep (unsigned int msec);
 static uint32 _sim_os_msec (void);
 
 /* sim_idle_ms_sleep uses pthread_cond_timedwait() which needs a absolute */
-/* end time that determines the timeout.  CLOCK_REALTIME gives us that.   */
-static int idle_clock = CLOCK_REALTIME; 
+/* end time that determines the timeout.  CLOCK_REALTIME gives us that,   */
+/* but an adjustment of the host's time of day, will cause undesirable    */
+/* effects on the idle behavior.  A better choice, when the               */
+/* pthread_condattr_setclock API is available, is to use CLOCK_MONOTONIC  */
+/* and properly initialize the sim_async_wake condition variable.         */
+/* The clock used will be CLOCK_MONOTONIC when an extended                */
+/* pthread_timedwait_relative_np API is available, in any case the        */
+/* sim_idle_clock value is set in AIO_INIT.                               */
+clockid_t sim_idle_clock;
 
 /* MS_MIN_GRANULARITY exists here so that timing behavior for hosts systems  */
 /* with slow clock ticks can be assessed and tested without actually having  */
@@ -328,8 +335,22 @@ t_bool timedout = FALSE;
 
 if (sim_asynch_enabled == FALSE)
   return sim_os_ms_sleep (msec);        /* No need to synchronize when asynch is disabled */
-clock_gettime(idle_clock, &timeout_time);
+clock_gettime(sim_idle_clock, &timeout_time);
 start_time = _timespec_to_double (&timeout_time);
+#if defined (HAS_PTHREAD_TIMEDWAIT_RELATIVE)
+timeout_time.tv_sec = (1000000*msec)/1000000000;
+timeout_time.tv_nsec = (1000000*msec)%1000000000;
+pthread_mutex_lock (&sim_asynch_lock);
+sim_idle_wait = TRUE;
+if (pthread_cond_timedwait_relative_np (&sim_asynch_wake, &sim_asynch_lock, &timeout_time))
+    timedout = TRUE;
+sim_idle_wait = FALSE;
+pthread_mutex_unlock (&sim_asynch_lock);
+if (!timedout)
+    sim_asynch_check = 0;               /* force check of asynch queue now */
+if (!timedout)
+    sim_asynch_check = 0;               /* force check of asynch queue now */
+#else /* !defined (HAS_PTHREAD_TIMEDWAIT_RELATIVE) */
 timeout_time.tv_nsec += 1000000*msec;
 if (timeout_time.tv_nsec >= 1000000000) {
   timeout_time.tv_sec += timeout_time.tv_nsec/1000000000;
@@ -343,7 +364,8 @@ sim_idle_wait = FALSE;
 pthread_mutex_unlock (&sim_asynch_lock);
 if (!timedout)
     sim_asynch_check = 0;               /* force check of asynch queue now */
-clock_gettime(idle_clock, &end_time);
+#endif /* !defined (HAS_PTHREAD_TIMEDWAIT_RELATIVE) */
+clock_gettime(sim_idle_clock, &end_time);
 if (!timedout) {
     AIO_UPDATE_QUEUE;
     }

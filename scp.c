@@ -361,7 +361,8 @@ static t_uint64 sim_processed_event_count = 0;
 #if defined (SIM_ASYNCH_IO)
 /* sim_async_lock is initialized in AIO_INIT as a recursive lock */
 pthread_mutex_t sim_asynch_lock;
-pthread_cond_t sim_asynch_wake = PTHREAD_COND_INITIALIZER;
+/* sim_async_wake is initialized in AIO_INIT as a with an assigned clock */
+pthread_cond_t sim_asynch_wake;
 
 pthread_mutex_t sim_timer_lock     = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t sim_timer_wake      = PTHREAD_COND_INITIALIZER;

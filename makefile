@@ -38,7 +38,7 @@
 # support, invoke GNU make with NOVIDEO=1 on the command line.
 #
 # By default, when host system support exists, asynchronous I/O support
-# will enabled by default.  To force a build without asynchronous I/O
+# will enabled by default.  To force a build without asynchronous I/O 
 # invoke GNU make with NOASYNC=1 on the command line.
 #
 # The default build will build compiler optimized binaries.
@@ -802,6 +802,7 @@ ifeq (${WIN32},)  #*nix Environments (&& cygwin)
   endif
   ifeq (,$(NOASYNC))
     ifneq (,$(call find_include,pthread))
+      PTHREAD_CCDEFS = $(if $(shell grep pthread_condattr_setclock $(call find_include,pthread)), -DHAS_PTHREAD_COND_SETCLOCK) $(if $(shell grep pthread_cond_timedwait_relative_np $(call find_include,pthread)), -DHAS_PTHREAD_TIMEDWAIT_RELATIVE)
       ifneq (,$(call find_lib,pthread))
         PTHREAD_CCDEFS += -DSIM_ASYNCH_IO
         PTHREAD_LDFLAGS += -lpthread
@@ -1362,15 +1363,13 @@ else
   $(info lib paths are: ${LIBPATH})
   $(info include paths are: ${INCPATH})
   # Give preference to any MinGW provided threading (if available)
-  ifeq (,$(NOASYNC))
-    ifneq (,$(call find_include,pthread))
-      PTHREADS_CCDEFS = -DUSE_READER_THREAD -DSIM_ASYNCH_IO
-      PTHREADS_LDFLAGS = -lpthread
-    else
-      ifeq (pthreads,$(shell if exist ..\windows-build\pthreads\Pre-built.2\include\pthread.h echo pthreads))
-        PTHREADS_CCDEFS = -DUSE_READER_THREAD -DPTW32_STATIC_LIB -D_POSIX_C_SOURCE -I../windows-build/pthreads/Pre-built.2/include -DSIM_ASYNCH_IO
-        PTHREADS_LDFLAGS = -lpthreadGC2 -L..\windows-build\pthreads\Pre-built.2\lib
-      endif
+  ifneq (,$(call find_include,pthread))
+    PTHREADS_CCDEFS = -DUSE_READER_THREAD -DSIM_ASYNCH_IO
+    PTHREADS_LDFLAGS = -lpthread
+  else
+    ifeq (pthreads,$(shell if exist ..\windows-build\pthreads\Pre-built.2\include\pthread.h echo pthreads))
+      PTHREADS_CCDEFS = -DUSE_READER_THREAD -DPTW32_STATIC_LIB -D_POSIX_C_SOURCE -I../windows-build/pthreads/Pre-built.2/include -DSIM_ASYNCH_IO
+      PTHREADS_LDFLAGS = -lpthreadGC2 -L..\windows-build\pthreads\Pre-built.2\lib
     endif
   endif
   ifeq (pcap,$(shell if exist ..\windows-build\winpcap\Wpdpack\include\pcap.h echo pcap))
@@ -1739,9 +1738,6 @@ ifeq (,$(MAKE_RESULT))
     endif
     ifneq (,$(VIDEO_FEATURES))
       $(info *** $(VIDEO_FEATURES).)
-    endif
-    ifneq (,$(NOASYNC))
-      $(info *** - Asynchronous I/O support is not provided.)
     endif
     ifneq (,$(TESTING_FEATURES))
       $(info *** $(TESTING_FEATURES).)
