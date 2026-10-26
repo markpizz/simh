@@ -1911,7 +1911,7 @@ VAX = ${VAXD}/vax_cpu.c ${VAXD}/vax_cpu1.c ${VAXD}/vax_fpa.c ${VAXD}/vax_io.c \
 	${PDP11D}/pdp11_dz.c ${PDP11D}/pdp11_lp.c ${PDP11D}/pdp11_tq.c \
 	${PDP11D}/pdp11_xq.c ${PDP11D}/pdp11_vh.c ${PDP11D}/pdp11_cr.c \
 	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_io_lib.c ${PDP11D}/pdp11_dup.c \
-	$(NETWORK_DEPS)
+	${PDP11D}/pdp11_dmc.c $(NETWORK_DEPS)
 VAX_OPT = -DVM_VAX -DUSE_INT64 -DUSE_ADDR64 -DUSE_SIM_VIDEO -I${VAXD} -I ${PDP11D} ${NETWORK_OPT} ${VIDEO_CCDEFS}
 
 
@@ -2004,7 +2004,7 @@ VAX630 = ${VAXD}/vax_cpu.c ${VAXD}/vax_cpu1.c ${VAXD}/vax_fpa.c \
 	${PDP11D}/pdp11_dz.c ${PDP11D}/pdp11_lp.c ${PDP11D}/pdp11_tq.c \
 	${PDP11D}/pdp11_xq.c ${PDP11D}/pdp11_vh.c ${PDP11D}/pdp11_cr.c \
 	${PDP11D}/pdp11_td.c ${PDP11D}/pdp11_io_lib.c ${PDP11D}/pdp11_dup.c \
-	$(NETWORK_DEPS)
+	${PDP11D}/pdp11_dmc.c $(NETWORK_DEPS)
 VAX620_OPT = -DVM_VAX -DVAX_620 -DUSE_INT64 -DUSE_ADDR64 -I ${VAXD} -I ${PDP11D} ${NETWORK_OPT}
 VAX630_OPT = -DVM_VAX -DVAX_630 -DUSE_INT64 -DUSE_ADDR64 -DUSE_SIM_VIDEO -I ${VAXD} -I ${PDP11D} ${NETWORK_OPT} ${VIDEO_CCDEFS}
 
