@@ -168,6 +168,9 @@ extern int32 tmr_poll;                                  /* instructions per tick
 #define DMP_SEL0_M_IEO      0x0010
 #define DMP_SEL0_V_RQI       7
 #define DMP_SEL0_M_RQI      0x0080
+/* DMV BSEL1 maintenance-register entry bits (SEL0 high byte). */
+#define DMV_SEL0_M_MNT_REQ  0x0100
+#define DMV_SEL0_M_MNT_EN   0x4000
 
 /* DMC/DMR register SEL2 */
 #define DMC_SEL2_V_CODE      0
@@ -196,6 +199,56 @@ extern int32 tmr_poll;                                  /* instructions per tick
 #define DMP_SEL2_M_RDI      0x0010
 #define DMP_SEL2_V_RDO       7
 #define DMP_SEL2_M_RDO      0x0080
+#define DMV_SEL2_M_MNT_RDY  0x0080
+
+#define DMV_MAINT_MEMORY_SIZE  0x10000
+#define DMV_MAINT_BLOCK_SIZE   0x0100
+
+/* DMV control-response codes (BSEL6/BSEL10, octal), per Table 3-7 in
+   EK-DMV11-TM-001_DMV11_Synchronous_Controller_Technical_Manual_Sep81.pdf,
+   printed pages 3-24 through 3-25.  That table defines 0304 as modem
+   disconnected, 0306 as queue overflow, and 0310 as carrier loss.
+   EK-DMVQM-UG-003_Aug88.pdf, Table 3-7 Output Codes (BSEL6) (Cont),
+   printed page 3-25, explicitly identifies BSEL7=0304 as the CTS-failure
+   global response; the technical manual describes the same CTS timeout in
+   Appendix D, section D.1.2, printed pages D-1 through D-2.  Thus
+   DMV_CTS_FAILURE_CODE has the same numeric value as the modem-disconnect
+   code, but is returned in the separate BSEL6/BSEL7 CTS-failure response
+   rather than as the Table 3-7 global modem-disconnect response. */
+#define DMV_RESPONSE_BUFFER_SMALL       0300
+#define DMV_RESPONSE_NONEXISTENT_MEMORY 0302
+#define DMV_RESPONSE_MODEM_DISCONNECTED 0304
+#define DMV_RESPONSE_QUEUE_OVERFLOW     0306
+#define DMV_RESPONSE_CARRIER_LOSS       0310
+
+#define DMV_MODEM_FAULT_NONE            0
+#define DMV_MODEM_FAULT_CARRIER        1
+#define DMV_MODEM_FAULT_CTS            2
+#define DMV_CTS_FAILURE_CODE           0304
+
+/* DMV11 status memory is one 64-byte GSS and up to twelve 64-byte TSSs.
+   The CSR interface addresses these sections as 16-bit words at octal
+   locations 00 through 37. */
+#define DMV_STATUS_WORDS  32
+#define DMV_TSS_COUNT     12
+
+/* DMV11 procedural errors (Table 3-7). */
+#define DMV_ERROR_NO_MODE              0100
+#define DMV_ERROR_INVALID_TYPE         0102
+#define DMV_ERROR_INVALID_MODE         0104
+#define DMV_ERROR_UNESTABLISHED        0106
+#define DMV_ERROR_GLOBAL_REQUIRED      0110
+#define DMV_ERROR_UNHALTED             0112
+#define DMV_ERROR_TOO_MANY_TSS         0114
+#define DMV_ERROR_ALREADY_ESTABLISHED  0116
+#define DMV_ERROR_INVALID_KEY          0120
+#define DMV_ERROR_ZERO_COUNT           0126
+#define DMV_ERROR_RESERVED_BITS        0134
+#define DMV_ERROR_COMMON_POOL_IN_USE   0136
+#define DMV_ERROR_QUOTA                0140
+
+/* CTS failure is a separate DMV disconnect control-out with its failure
+   code in BSEL7; it is not one of these global Table 3-7 response codes. */
 
 /* DMC/DMR register SEL4 */
 #define DMC_SEL4_V_CAR       0
@@ -217,6 +270,21 @@ extern int32 tmr_poll;                                  /* instructions per tick
 
 /* SEL2 */
 #define DMP_TYPE_INPUT_MASK 0x0007
+
+/* DMP/DMV control-command request keys (SEL6 bits 0-4) */
+#define DMP_C_KEY_NOP        000
+#define DMP_C_KEY_ESTAB      001
+#define DMP_C_KEY_DELETE     002
+#define DMP_C_KEY_START      003
+#define DMP_C_KEY_MAINT      004
+#define DMP_C_KEY_HALT       005
+#define DMP_C_KEY_MODEM      020
+#define DMP_C_KEY_MODEM_WRITE 021
+#define DMP_C_KEY_TSS        100
+
+/* Successful DMV11 startup diagnostic signature (BSEL4/BSEL6). */
+#define DMV_STARTUP_BSEL4   033
+#define DMV_STARTUP_BSEL6   0305
 
 /* DMC/DMR register SEL6 */
 /* Bit Flags used in a Control Out command */
@@ -266,6 +334,10 @@ extern int32 tmr_poll;                                  /* instructions per tick
 
 #define DMC_QUEUE_SIZE  7
 #define DMR_QUEUE_SIZE 64
+/* The shared allocator creates two DMP_QUEUE_SIZE-sized halves (the
+   historical SIMH DMP/DMC queue convention), so DMV currently exposes 128
+   reusable BUFFER records.  This is a SIMH allocation limit, not a claim
+   about an undocumented DMV11 hardware pool depth. */
 #define DMP_QUEUE_SIZE 64
 
 struct csrs {
@@ -536,6 +608,7 @@ typedef struct buffer {
     BufferType type;          /* 0 = Receive Buffer, 1 = Transmit Buffer */
     uint32 address;           /* unibus address of the buffer (or 0 for DDCMP control messages) */
     uint16 count;             /* size of the buffer passed to the device by the driver */
+    t_bool is_22bit;          /* request used the DMV Q22 address/count format */
     uint8 *transfer_buffer;   /* the buffer into which data is received or from which it is transmitted*/
     int actual_bytes_transferred;/* the number of bytes from the actual block that have been read or written */
     uint32 buffer_return_time;/* time to return buffer to host */
@@ -626,7 +699,10 @@ typedef struct {
 
 typedef struct control {
     struct control *next;       /* Link */
+    uint16  sel2;               /* BSEL3 and output response code */
+    uint16  sel4;               /* Output response address/data */
     uint16  sel6;               /* Control Out Status Flags */
+    uint16  sel10;              /* 22-bit control-response code (BSEL10) */
     } CONTROL_OUT;
 
 typedef enum {
@@ -653,6 +729,27 @@ typedef struct dmc_controller {
     BUFFER **buffers;               /* Buffers */
     CONTROL_OUT *control_out;
     DEVTYPE dev_type;
+    uint16 dmp_mode;
+    t_bool dmp_mode_set;
+    t_bool dmp_tributary_established;
+    uint16 dmv_gss[DMV_STATUS_WORDS];
+    uint16 dmv_tss[DMV_TSS_COUNT][DMV_STATUS_WORDS];
+    uint8 dmv_tss_address[DMV_TSS_COUNT];
+    uint8 dmv_tss_state[DMV_TSS_COUNT];
+    uint16 dmv_tss_present;
+    uint8 dmv_common_pool_enabled[DMV_TSS_COUNT];
+    uint16 dmv_common_pool_quota[DMV_TSS_COUNT];
+    uint16 dmv_polling_state[DMV_TSS_COUNT];
+    t_bool dmv_maintenance_mode;
+    uint8 *dmv_maintenance_memory;
+    t_bool dmv_carrier_loss_pending;
+    double dmv_carrier_loss_start;
+    t_bool dmv_receive_in_progress;
+    uint8 dmv_modem_fault;
+    t_bool dmv_dsr_loss_pending;
+    double dmv_dsr_loss_start;
+    t_bool dmv_cts_failure_pending;
+    double dmv_cts_failure_start;
     uint32 in_int;
     uint32 out_int;
     uint32 dmc_wr_delay;
@@ -1063,6 +1160,8 @@ t_stat dmc_setstats (UNIT* uptr, int32 val, CONST char* cptr, void* desc);
 t_stat dmc_showstats (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat dmc_showqueues (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat dmc_setconnectpoll (UNIT* uptr, int32 val, CONST char* cptr, void* desc);
+t_stat dmv_setfault (UNIT* uptr, int32 val, CONST char* cptr, void* desc);
+t_stat dmv_showfault (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat dmc_showconnectpoll (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat dmc_showddcmp (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat dmc_help (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, const char *cptr);
@@ -1075,6 +1174,12 @@ int dmc_is_rqi_set (CTLR *controller);
 int dmc_is_rdyi_set (CTLR *controller);
 int dmc_is_iei_set (CTLR *controller);
 int dmc_is_ieo_set (CTLR *controller);
+int dmc_is_rdyo_set (CTLR *controller);
+void dmc_setinint (CTLR *controller);
+void dmc_clrinint (CTLR *controller);
+void dmc_setoutint (CTLR *controller);
+void dmc_clroutint (CTLR *controller);
+void dmc_update_csr_interrupts (CTLR *controller, uint16 old_sel0, uint16 old_sel2);
 uint32 dmc_get_addr (CTLR *controller);
 void dmc_set_addr (CTLR *controller, uint32 addr);
 uint16 dmc_get_count (CTLR *controller);
@@ -1083,6 +1188,9 @@ uint8 dmc_get_modem (CTLR *controller);
 void dmc_set_modem_dtr (CTLR *controller);
 void dmc_clr_modem_dtr (CTLR *controller);
 void dmc_process_immediate(CTLR *controller);
+void dmv_process_maintenance_command(CTLR *controller);
+void dmv_process_maintenance_entry(CTLR *controller);
+uint32 dmv_get_maintenance_bus_address(CTLR *controller);
 void dmc_process_command (CTLR *controller);
 t_bool dmc_buffer_fill_receive_buffers (CTLR *controller);
 void dmc_start_transfer_buffer (CTLR *controller);
@@ -1093,6 +1201,16 @@ BUFFER *dmc_buffer_allocate (CTLR *controller);
 t_bool dmc_transmit_queue_empty  (CTLR *controller);
 void dmc_ddcmp_start_transmitter (CTLR *controller);
 void dmc_queue_control_out (CTLR *controller, uint16 sel6);
+void dmc_queue_control_out_data (CTLR *controller, uint16 sel2, uint16 sel4, uint16 sel6, uint16 sel10);
+void dmv_queue_control_response (CTLR *controller, uint16 sel4, uint16 sel6);
+void dmv_queue_information_response (CTLR *controller, uint16 station, uint16 data, uint16 location, t_bool clear);
+static void dmv_queue_information_key_response (CTLR *controller, uint16 station, uint16 data, uint16 key);
+void dmv_queue_global_response (CTLR *controller, uint16 code);
+static void dmv_initialize_status(CTLR *controller);
+void dmv_queue_buffer_error_response (CTLR *controller, uint32 address, uint16 code, t_bool is_22bit);
+void dmv_check_carrier_loss (CTLR *controller, uint8 old_modem, uint8 new_modem, t_bool receive_in_progress);
+static t_bool dmv_check_dsr_loss (CTLR *controller, uint8 old_modem, uint8 new_modem);
+static t_bool dmv_check_cts_failure (CTLR *controller, uint8 old_modem, uint8 new_modem);
 
 /* debugging bitmaps */
 #define DBG_TRC  0x0001                                 /* trace routine calls */
@@ -1104,6 +1222,8 @@ void dmc_queue_control_out (CTLR *controller, uint16 sel6);
 #define DBG_DAT  (DBG_DTS|DDCMP_DBG_PDAT)               /* display data buffer contents */
 #define DBG_MDM  0x0040                                 /* modem related transitions */
 #define DBG_CON  TMXR_DBG_CON                           /* display socket open/close, connection establishment */
+#define DBG_XMT  TMXR_DBG_XMT                           /* display raw TMXR transmit data */
+#define DBG_RCV  TMXR_DBG_RCV                           /* display raw TMXR receive data */
 #define DBG_INT  0x0080                                 /* display interrupt activites */
 
 
@@ -1117,6 +1237,8 @@ DEBTAB dmc_debug[] = {
     {"DATASUM", DBG_DTS, "data summary"},
     {"MODEM",   DBG_MDM, "modem related transitions"},
     {"CONNECT", DBG_CON, "connection establishment"},
+    {"XMT",     DBG_XMT, "raw socket transmit data"},
+    {"RCV",     DBG_RCV, "raw socket receive data"},
     {"INT",     DBG_INT, "interrupt activites"},
     {0}
     };
@@ -1176,7 +1298,7 @@ BUFFER *dmc_buffers[DMC_NUMDEVICE];
 
 TMLN dmp_ldsc[DMC_NUMDEVICE];               /* line descriptors */
 TMXR dmp_desc = { 1, NULL, 0, dmp_ldsc };   /* mux descriptor */
-uint32 dmp_connect_poll;                    /* seconds between polls when no connection */
+uint32 dmp_connect_poll = DMC_CONNECT_POLL; /* seconds between polls when no connection */
 
 BUFFER_QUEUE dmp_rcv_queues[DMP_NUMDEVICE];
 BUFFER_QUEUE dmp_completion_queues[DMP_NUMDEVICE];
@@ -1293,6 +1415,9 @@ MTAB dmv_mod[] = {
         NULL, &dmc_showqueues, NULL, "Display Queue state" },
     { MTAB_XTD|MTAB_VUN|MTAB_NMO, 0, "DDCMP", "DDCMP",
         NULL, &dmc_showddcmp, NULL, "Display DDCMP state information" },
+    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0, "FAULT", "FAULT={NONE,CARRIER,CTS}",
+        &dmv_setfault, &dmv_showfault, NULL,
+        "Test fixture: inject carrier-only or CTS modem faults" },
     { MTAB_XTD|MTAB_VDV,          0, "CONNECTPOLL", "CONNECTPOLL=seconds",
         &dmc_setconnectpoll, &dmc_showconnectpoll, (void *) &dmp_connect_poll, "Display connection poll interval" },
     { MTAB_XTD|MTAB_VDV|MTAB_VALR,        020, "ADDRESS", "ADDRESS",
@@ -1344,10 +1469,15 @@ DEVICE dmp_dev =
     &dmp_dib, DEV_DISABLE | DEV_DIS | DEV_UBUS | DEV_DEBUG | DEV_DONTAUTO, 0, dmc_debug,
     NULL, NULL, &dmc_help, &dmc_help_attach, NULL, &dmp_description };
 
+/* DMV is registered as a Qbus device because the host-visible interface now
+   has modeled CSR, interrupt, DMA, maintenance-function 1-4, modem, and
+   point-to-point DDCMP behavior with a standalone regression fixture.  This
+   registration deliberately does not claim that the on-card 6502 firmware,
+   multipoint polling/routing, MOP, or maintenance functions 5-7 are modeled. */
 DEVICE dmv_dev =
     { "DMV", dmp_units, dmp_reg, dmv_mod, 3, DMC_RDX, 8, 1, DMC_RDX, 8,
     NULL, NULL, &dmc_reset, NULL, &dmc_attach, &dmc_detach,
-    &dmp_dib, DEV_DISABLE | DEV_DIS | DEV_QBUS | DEV_DEBUG | DEV_DONTAUTO, 0, dmc_debug,
+    &dmv_dib, DEV_DISABLE | DEV_DIS | DEV_QBUS | DEV_DEBUG | DEV_DONTAUTO, 0, dmc_debug,
     NULL, NULL, &dmc_help, &dmc_help_attach, NULL, &dmp_description };
 
 CTLR dmc_ctrls[DMC_NUMDEVICE + DMP_NUMDEVICE];
@@ -1370,11 +1500,17 @@ return (CTLR *)unit->ctlr;
 CTLR* dmc_get_controller_from_address(uint32 address)
 {
 int i;
+int unit;
+int controller_offset;
 
 for (i=0; i<DMC_NUMDEVICE + DMP_NUMDEVICE; i++) {
     DIB *dib = (DIB *)dmc_ctrls[i].device->ctxt;
     if ((address >= dib->ba) && (address < (dib->ba + dib->lnt)))
-        return &dmc_ctrls[(address - dib->ba) >> ((UNIBUS) ? 3 : 4)];
+        {
+        unit = (address - dib->ba) >> ((UNIBUS) ? 3 : 4);
+        controller_offset = (dmc_ctrls[i].device == &dmc_dev) ? 0 : DMC_NUMDEVICE;
+        return &dmc_ctrls[controller_offset + unit];
+        }
     }
 /* not found */
 return 0;
@@ -1440,6 +1576,41 @@ newspeed = (int32) get_uint (cptr, 10, 100000000, &r);
 if (r != SCPE_OK)
     return r;
 speeds[dmc] = newspeed;
+return SCPE_OK;
+}
+
+/* Configure a deterministic DMV-only modem fault for protocol tests.  This
+   is intentionally a line-unit fixture rather than a general TMXR feature:
+   the real TCP path cannot drop DCD while retaining DSR. */
+t_stat dmv_setfault (UNIT* uptr, int32 val, CONST char* cptr, void* desc)
+{
+char gbuf[80];
+CTLR *controller = dmc_get_controller_from_unit(uptr);
+
+if ((controller->device != &dmv_dev) || !cptr || !*cptr)
+    return SCPE_ARG;
+cptr = get_glyph (cptr, gbuf, 0);
+if (MATCH_CMD (gbuf, "NONE") == 0)
+    controller->dmv_modem_fault = DMV_MODEM_FAULT_NONE;
+else if (MATCH_CMD (gbuf, "CARRIER") == 0)
+    controller->dmv_modem_fault = DMV_MODEM_FAULT_CARRIER;
+else if (MATCH_CMD (gbuf, "CTS") == 0)
+    controller->dmv_modem_fault = DMV_MODEM_FAULT_CTS;
+else
+    return SCPE_ARG;
+return SCPE_OK;
+}
+
+t_stat dmv_showfault (FILE* st, UNIT* uptr, int32 val, CONST void* desc)
+{
+CTLR *controller = dmc_get_controller_from_unit(uptr);
+
+if (controller->dmv_modem_fault == DMV_MODEM_FAULT_CARRIER)
+    fprintf(st, "fault=CARRIER (mask DCD during partial receive, retain DSR)");
+else if (controller->dmv_modem_fault == DMV_MODEM_FAULT_CTS)
+    fprintf(st, "fault=CTS (hold CTS off after entering Run)");
+else
+    fprintf(st, "fault=NONE");
 return SCPE_OK;
 }
 
@@ -1668,7 +1839,7 @@ if (controller->control_out) {
 
     fprintf (st, "Control Out Queue:\n");
     for (control=controller->control_out; control; control=control->next)
-        fprintf (st, "   SEL6:  0x%04X\n", control->sel6);
+        fprintf (st, "   SEL2:  0x%04X SEL4: 0x%04X SEL6: 0x%04X SEL10: 0x%04X\n", control->sel2, control->sel4, control->sel6, control->sel10);
     }
 return SCPE_OK;
 }
@@ -1818,7 +1989,11 @@ const char helpString[] =
     " and a sync line unit.\n"
     "3 DMV11\n"
     " A Qbus version of the DMP11 with some more advanced refinements and a sync\n"
-    " line unit.\n"
+    " line unit.  The emulation models the host-visible registers, DMA,\n"
+    " interrupts, maintenance functions 1-4, and point-to-point DDCMP.\n"
+    " It does not execute the card's internal 6502 firmware or require its\n"
+    " ROM contents; multipoint polling/routing, MOP/remote load, and\n"
+    " maintenance functions 5-7 are outside the current model.\n"
 #endif
     "2 $Registers\n"
     "\n"
@@ -2044,6 +2219,35 @@ if (!controller->out_int) {
 controller->out_int = 1;
 dmc_outi_summary |= (1u << controller->index);
 SET_INT(DMCTX);
+}
+
+/* Keep the simulated interrupt request consistent with the CSR handshake.
+   The ready bits are owned by the controller, but the enable bits are
+   programmable by the host.  A host may enable an interrupt after the
+   corresponding ready bit has already been asserted, or clear a ready bit
+   before the CPU acknowledges the interrupt. */
+void dmc_update_csr_interrupts(CTLR *controller, uint16 old_sel0, uint16 old_sel2)
+{
+uint16 new_sel0 = *controller->csrs->sel0;
+uint16 new_sel2 = *controller->csrs->sel2;
+t_bool old_in = dmc_is_dmc(controller) ?
+                ((old_sel0 & DMC_SEL0_M_IEI) && (old_sel0 & DMC_SEL0_M_RDI)) :
+                ((old_sel0 & DMP_SEL0_M_IEI) && (old_sel2 & DMP_SEL2_M_RDI));
+t_bool new_in = dmc_is_iei_set(controller) && dmc_is_rdyi_set(controller);
+t_bool old_out = dmc_is_dmc(controller) ?
+                 ((old_sel2 & DMC_SEL2_M_IEO) && (old_sel2 & DMC_SEL2_M_RDO)) :
+                 ((old_sel0 & DMP_SEL0_M_IEO) && (old_sel2 & DMP_SEL2_M_RDO));
+t_bool new_out = dmc_is_ieo_set(controller) && dmc_is_rdyo_set(controller);
+
+if (new_in && !old_in)
+    dmc_setinint(controller);
+else if (!new_in && old_in)
+    dmc_clrinint(controller);
+
+if (new_out && !old_out)
+    dmc_setoutint(controller);
+else if (!new_out && old_out)
+    dmc_clroutint(controller);
 }
 
 void dmc_clroutint(CTLR *controller)
@@ -2281,6 +2485,10 @@ int dmc_is_lu_loop_set(CTLR *controller)
 {
 if (dmc_is_dmc(controller))
     return ((*controller->csrs->sel0 & DMC_SEL0_M_LU_LOOP) != 0);
+/* The DMV11's internal line-unit loop is a diagnostic/microcode function;
+   SEL0 has no documented LU_LOOP bit on this interface.  Do not alias the
+   DMC11 bit into DMV until a DMV diagnostic or print-set trace establishes
+   the host-visible command and response semantics. */
 else
     return FALSE;
 }
@@ -2372,6 +2580,7 @@ if (dmc_is_dmc(controller))
     dmc_setreg(controller, 0, *controller->csrs->sel0 & ~(DMC_SEL0_M_RDI|DMC_SEL0_M_ITYPE), DBG_RGC);
 else
     dmc_setreg(controller, 2, *controller->csrs->sel2 & ~DMP_SEL2_M_RDI, DBG_RGC);
+dmc_clrinint(controller);
 }
 
 void dmc_set_rdyo(CTLR *controller)
@@ -2429,6 +2638,29 @@ tmxr_set_get_modem_bits (controller->line, 0, 0, &modem_bits);
 *controller->modem |= (modem_bits&TMXR_MDM_RNG) ? DMC_SEL4_M_RI : 0;
 *controller->modem |= (modem_bits&TMXR_MDM_DTR) ? DMC_SEL4_M_DTR : 0;
 *controller->modem |= (modem_bits&TMXR_MDM_RTS) ? DMC_SEL4_M_RTS : 0;
+/* For DMV, DSR is supplied by the connected line.  TMXR also reports
+   locally-driven modem state while a destination socket is being opened;
+   that must not mask the DSR transition caused by a dropped TCP session. */
+if ((controller->device == &dmv_dev) && !controller->line->sock &&
+    !controller->line->serport && !controller->line->loopback)
+    *controller->modem &= ~DMC_SEL4_M_DSR;
+/* The carrier-only fixture is armed by SET DMVn FAULT=CARRIER.  It waits
+   until TMXR has accumulated a partial DDCMP frame, then masks only DCD so
+   that the DMV's 1.28-second carrier-loss path can be tested without causing
+   the ordinary DSR-loss disconnect (0304). */
+if ((controller->device == &dmv_dev) &&
+    (controller->dmv_modem_fault == DMV_MODEM_FAULT_CARRIER) &&
+    controller->dmv_receive_in_progress) {
+    *controller->modem &= ~DMC_SEL4_M_CAR;
+    *controller->modem |= DMC_SEL4_M_DSR;
+    }
+/* The CTS fixture is armed only after the link reaches Run.  This lets the
+   normal DDCMP startup handshake complete before the test holds CTS off for
+   the documented disconnect timeout. */
+if ((controller->device == &dmv_dev) &&
+    (controller->dmv_modem_fault == DMV_MODEM_FAULT_CTS) &&
+    (controller->link.state == Run))
+    *controller->modem &= ~DMC_SEL4_M_CTS;
 return (*controller->modem);
 }
 
@@ -2490,8 +2722,19 @@ CONTROL_OUT *control;
 sim_debug(DBG_INF, controller->device, "%s%d: Master clear\n", controller->device->name, controller->index);
 dmc_clear_master_clear(controller);
 dmc_clr_modem_dtr(controller);
+ddcmp_StopTimer(controller);
 controller->link.state = Halt;
 controller->state = Initialised;
+controller->dmv_carrier_loss_pending = FALSE;
+controller->dmv_carrier_loss_start = 0;
+controller->dmv_dsr_loss_pending = FALSE;
+controller->dmv_dsr_loss_start = 0;
+controller->dmv_cts_failure_pending = FALSE;
+controller->dmv_cts_failure_start = 0;
+if (controller->dev_type == DMP) {
+    controller->dmv_maintenance_mode = FALSE;
+    *controller->csrs->sel2 &= ~DMV_SEL2_M_MNT_RDY;
+    }
 while ((control = controller->control_out)) {
     controller->control_out = control->next;
     free (control);
@@ -2512,14 +2755,144 @@ if (controller->dev_type == DMR) {
         }
     }
 if (controller->dev_type == DMP) {
-    dmc_setreg(controller, 4, 077, DBG_RGC);
-    dmc_setreg(controller, 6, 0305, DBG_RGC);
+    controller->dmp_mode = 0;
+    controller->dmp_mode_set = FALSE;
+    controller->dmp_tributary_established = FALSE;
+    dmv_initialize_status(controller);
+    dmc_setreg(controller, 4, (controller->device == &dmv_dev) ? DMV_STARTUP_BSEL4 : 077, DBG_RGC);
+    dmc_setreg(controller, 6, DMV_STARTUP_BSEL6, DBG_RGC);
     }
 dmc_buffer_queue_init_all(controller);
 
 controller->transfer_state = Idle;
 if (dmc_is_attached(controller->unit))
     dmc_set_run(controller);
+}
+
+/* Enter the DMV11 microcode maintenance loop when BSEL1 bits 0 and 6 are
+   written together.  The real controller reports readiness through BSEL2
+   bit 7; this is distinct from the normal DDCMP RDO handshake. */
+void dmv_process_maintenance_entry(CTLR *controller)
+{
+if ((controller->device != &dmv_dev) ||
+    controller->dmv_maintenance_mode ||
+    !dmc_is_attached(controller->unit) ||
+    ((*controller->csrs->sel0 & (DMV_SEL0_M_MNT_REQ | DMV_SEL0_M_MNT_EN)) !=
+     (DMV_SEL0_M_MNT_REQ | DMV_SEL0_M_MNT_EN)))
+    return;
+
+if (!controller->dmv_maintenance_memory)
+    controller->dmv_maintenance_memory = (uint8 *)calloc(1, DMV_MAINT_MEMORY_SIZE);
+if (!controller->dmv_maintenance_memory) {
+    sim_debug(DBG_WRN, controller->device, "%s%d: Unable to allocate maintenance memory\n", controller->device->name, controller->index);
+    return;
+    }
+
+controller->dmv_maintenance_mode = TRUE;
+*controller->csrs->sel2 |= DMV_SEL2_M_MNT_RDY;
+sim_debug(DBG_INF, controller->device, "%s%d: Entered maintenance-register mode\n", controller->device->name, controller->index);
+}
+
+/* Functions 3 and 4 use SEL6 as the low 16 bus-address bits.  The DMV
+   maintenance diagram labels the extension register BSEL10; the function
+   table calls the same field BSEL8.  This is a historical naming inconsistency
+   in the manual: the CSR figure and the detailed text identify the word CSR
+   as SEL10, with only its low byte used.  In the Qbus CSR map this is the
+   existing SEL10 register, whose low six bits carry A16-A21 in Q22 mode.
+   Note that the register debug path prints the byte offset as a decimal
+   number, so the SEL10 (octal) byte offset appears there as SEL8. */
+uint32 dmv_get_maintenance_bus_address(CTLR *controller)
+{
+uint32 address = *controller->csrs->sel6;
+
+if (*controller->csrs->sel2 & DMP_SEL2_M_22BIT)
+    address |= ((uint32)(*controller->csrs->sel10 & 0x003F) << 16);
+
+return address & PAMASK;
+}
+
+/* Execute the documented DMV11 maintenance functions.  Functions 1 through 4
+   have modeled memory/register behavior.  Functions 5 through 7 remain
+   outside this host-visible model: function 5 starts the on-card 6502 at the
+   SEL4 address, while functions 6 and 7 operate on card-internal loop/clock
+   and maintenance-interrupt state.  SIMH does not currently have a DMV 6502
+   core or the DMV ROM image needed to perform those operations. */
+void dmv_process_maintenance_command(CTLR *controller)
+{
+uint16 function;
+uint16 address;
+uint32 bus_address;
+int32 remaining;
+
+if (!controller->dmv_maintenance_mode)
+    return;
+
+function = *controller->csrs->sel2 & DMP_SEL2_M_CODE;
+address = *controller->csrs->sel4;
+*controller->csrs->sel2 &= ~DMV_SEL2_M_MNT_RDY;
+
+switch (function) {
+    case 1:                         /* Read DMV memory byte */
+        *controller->csrs->sel6 = (*controller->csrs->sel6 & 0xFF00) |
+                                   controller->dmv_maintenance_memory[address];
+        break;
+    case 2:                         /* Write DMV memory byte */
+        controller->dmv_maintenance_memory[address] = *controller->csrs->sel6 & 0x00FF;
+        break;
+    case 3:                         /* Read 256 bytes: DMV memory -> LSI-II */
+        address &= 0xFF00;
+        bus_address = dmv_get_maintenance_bus_address(controller);
+        remaining = Map_WriteB(bus_address, DMV_MAINT_BLOCK_SIZE,
+                               controller->dmv_maintenance_memory + address);
+        if (remaining)
+            sim_debug(DBG_WRN, controller->device,
+                      "%s%d: Maintenance DMA write failed at bus 0x%06x (%d bytes remain)\n",
+                      controller->device->name, controller->index,
+                      bus_address, remaining);
+        sim_debug(DBG_INF, controller->device,
+                  "%s%d: Maintenance DMA function %d bus address 0x%06x\n",
+                  controller->device->name, controller->index, function,
+                  bus_address);
+        break;
+    case 4:                         /* Write 256 bytes: LSI-II -> DMV memory */
+        address &= 0xFF00;
+        bus_address = dmv_get_maintenance_bus_address(controller);
+        remaining = Map_ReadB(bus_address, DMV_MAINT_BLOCK_SIZE,
+                              controller->dmv_maintenance_memory + address);
+        if (remaining)
+            sim_debug(DBG_WRN, controller->device,
+                      "%s%d: Maintenance DMA read failed at bus 0x%06x (%d bytes remain)\n",
+                      controller->device->name, controller->index,
+                      bus_address, remaining);
+        sim_debug(DBG_INF, controller->device,
+                  "%s%d: Maintenance DMA function %d bus address 0x%06x\n",
+                  controller->device->name, controller->index, function,
+                  bus_address);
+        break;
+    case 5:                         /* Start the DMV 6502 at SEL4 */
+        /* Do not model this as a PC latch: without the processor and its ROM,
+           that would make a successful maintenance handshake look like
+           successful 6502 execution.  Keep the command completion behavior
+           so diagnostics can observe the current implementation boundary. */
+        sim_debug(DBG_WRN, controller->device,
+                  "%s%d: DMV maintenance function 5 requests 6502 PC start at 0x%04x; no DMV 6502/ROM model is present\n",
+                  controller->device->name, controller->index, address);
+        break;
+    case 0:                         /* Reserved */
+        break;
+    case 6:                         /* Internal loop/null clock */
+    case 7:                         /* Maintenance interrupt flags */
+        sim_debug(DBG_WRN, controller->device,
+                  "%s%d: DMV maintenance function %d is not modeled\n",
+                  controller->device->name, controller->index, function);
+        break;
+    default:
+        sim_debug(DBG_WRN, controller->device, "%s%d: Unsupported DMV maintenance function %d\n", controller->device->name, controller->index, function);
+        break;
+    }
+
+*controller->csrs->sel2 |= DMV_SEL2_M_MNT_RDY;
+sim_debug(DBG_INF, controller->device, "%s%d: Maintenance function %d complete at 0x%04x\n", controller->device->name, controller->index, function, address);
 }
 
 void dmc_start_input_transfer(CTLR *controller)
@@ -2531,25 +2904,39 @@ dmc_set_rdyi(controller);
 
 void dmc_start_control_output_transfer(CTLR *controller)
 {
-if ((!controller->control_out) || 
-    (controller->transfer_state != Idle) || 
-    (dmc_is_rdyo_set(controller)))
+if ((!controller->control_out) ||
+    (controller->transfer_state != Idle) ||
+    (dmc_is_rdyo_set(controller)) ||
+    (dmc_is_rdyi_set(controller)))
     return;
-sim_debug(DBG_INF, controller->device, "%s%d: Starting control output transfer: SEL6 = 0x%04X\n", controller->device->name, controller->index, controller->control_out->sel6);
+sim_debug(DBG_INF, controller->device, "%s%d: Starting control output transfer: SEL2 = 0x%04X SEL4 = 0x%04X SEL6 = 0x%04X\n", controller->device->name, controller->index, controller->control_out->sel2, controller->control_out->sel4, controller->control_out->sel6);
 controller->transfer_state = OutputControl;
+dmc_setreg (controller, 2, controller->control_out->sel2, DBG_RGC);
+dmc_setreg (controller, 4, controller->control_out->sel4, DBG_RGC);
 dmc_setreg (controller, 6, controller->control_out->sel6, DBG_RGC);
-dmc_set_type_output(controller, DMC_C_TYPE_CNTL);
+if (!dmc_is_dmc(controller) && (controller->control_out->sel2 & DMP_SEL2_M_22BIT))
+    dmc_setreg (controller, 010, controller->control_out->sel10, DBG_RGC);
+    /* Control responses use type 1; TSS/GSS and modem reads use the
+       documented information-response type 2. */
+    dmc_set_type_output(controller, controller->control_out->sel2 & DMP_SEL2_M_CODE);
 dmc_set_rdyo(controller);
 }
 
 void dmc_complete_transmit(CTLR *controller)
 {
 BUFFER *buffer = controller->link.xmt_buffer;
+t_bool nested_scan;
 if (!buffer)
     return;
+nested_scan = controller->link.Scanning;
 controller->link.xmt_done_buffer = buffer;
 ddcmp_dispatch (controller, DDCMP_EVENT_XMIT_DONE);
-controller->link.xmt_done_buffer = NULL;
+/* If completion happened from inside another DDCMP dispatch, the event was
+   deferred for the recursive scan.  Keep xmt_done_buffer visible until that
+   scan consumes it; otherwise DataMessageSent/REPMessageSent cannot inspect
+   the completed packet and the reply timer is lost. */
+if (!nested_scan)
+    controller->link.xmt_done_buffer = NULL;
 buffer = (BUFFER *)remqueue (&buffer->hdr);
 buffer->actual_bytes_transferred = buffer->count;
 controller->buffers_transmitted_to_net++;
@@ -2617,6 +3004,9 @@ DEVICE *dptr = ((CTLR *)uptr->ctlr)->device;
 CTLR *controller;
 TMXR *mp = (dptr == &dmc_dev) ? &dmc_desc : &dmp_desc;
 int32 dmc, active, attached;
+t_bool carrier_timer_pending = FALSE;
+t_bool dsr_timer_pending = FALSE;
+t_bool cts_timer_pending = FALSE;
 
 sim_debug(DBG_TRC, dptr, "dmc_poll_svc()\n");
 
@@ -2627,6 +3017,11 @@ if (dmc >= 0) {                                 /* new connection? */
     sim_debug(DBG_MDM, dptr, "dmc_poll_svc(dmc=%d) - Connection State Change to UP(ON)\n", dmc);
     ddcmp_dispatch (controller, 0);
     sim_clock_coschedule (controller->unit, tmxr_poll); /* be sure to wake up soon to continue processing */
+    }
+for (dmc = 0; dmc < mp->lines; dmc++) {
+    controller = (CTLR *)dptr->units[dmc].ctlr;
+    controller->dmv_receive_in_progress =
+        (controller->device == &dmv_dev) && (controller->line->rxpboffset != 0);
     }
 tmxr_poll_rx (mp);
 tmxr_poll_tx (mp);
@@ -2642,15 +3037,26 @@ for (dmc=active=attached=0; dmc < mp->lines; dmc++) {
         ++active;
     old_modem = *controller->modem;
     new_modem = dmc_get_modem (controller);
-    if ((old_modem & DMC_SEL4_M_CAR) && 
-        (!(new_modem & DMC_SEL4_M_CAR))) {
+    dmv_check_carrier_loss(controller, old_modem, new_modem,
+                           controller->dmv_receive_in_progress);
+    if (controller->dmv_carrier_loss_pending)
+        carrier_timer_pending = TRUE;
+    if (controller->device == &dmv_dev) {
+        if (dmv_check_dsr_loss(controller, old_modem, new_modem))
+            dsr_timer_pending = TRUE;
+        if (dmv_check_cts_failure(controller, old_modem, new_modem))
+            cts_timer_pending = TRUE;
+        }
+    else if ((old_modem & DMC_SEL4_M_CAR) &&
+             (!(new_modem & DMC_SEL4_M_CAR))) {
         sim_debug(DBG_MDM, controller->device, "dmc_poll_svc(dmc=%d) - Connection State Change to %s\n", dmc, (new_modem & DMC_SEL4_M_CAR) ? "UP(ON)" : "DOWN(OFF)");
         ddcmp_dispatch (controller, 0);
         sim_clock_coschedule (controller->unit, tmxr_poll); /* wake up soon to finish processing */
         }
-    if ((lp->xmte && tmxr_tpbusyln(lp)) || 
+    if ((lp->xmte && tmxr_tpbusyln(lp)) ||
         (lp->xmte && controller->link.xmt_buffer) ||
-        ddcmp_UserSendMessage(controller)) {
+        ddcmp_UserSendMessage(controller) ||
+        controller->control_out) {
         if (tmxr_tpbusyln(lp)) {
             sim_debug(DBG_DAT, controller->device, "dmc_poll_svc(dmc=%d) - Packet Transmission of remaining %d bytes restarting...\n", dmc, tmxr_tpqln (lp));
             }
@@ -2659,7 +3065,7 @@ for (dmc=active=attached=0; dmc < mp->lines; dmc++) {
     if (dmc_buffer_fill_receive_buffers(controller))
         dmc_svc (&controller->device->units[dmc]);  /* return ACKed transmit packets */
     }
-if (active)
+if (active || carrier_timer_pending || dsr_timer_pending || cts_timer_pending)
     sim_clock_coschedule (uptr, tmxr_poll);         /* reactivate */
 else {
     for (dmc=0; dmc < mp->lines; dmc++) {
@@ -2735,6 +3141,11 @@ BUFFER *dmc_buffer_allocate(CTLR *controller)
 BUFFER *buffer = (BUFFER *)remqueue (controller->free_queue->hdr.next);
 
 if (!buffer) {
+    if (controller->device == &dmv_dev) {
+        dmv_queue_global_response(controller, DMV_RESPONSE_QUEUE_OVERFLOW);
+        controller->state = Halted;
+        dmc_clr_modem_dtr(controller);
+        }
     sim_printf ("DDCMP Buffer allocation failure.\n");
     sim_printf ("This is a fatal error which should never happen.\n");
     sim_printf ("Please submit this output when you report this bug.\n");
@@ -2757,6 +3168,7 @@ if (!buffer) {
     }
 buffer->address = 0;
 buffer->count = 0;
+buffer->is_22bit = FALSE;
 free (buffer->transfer_buffer);
 buffer->transfer_buffer = NULL;
 buffer->actual_bytes_transferred = 0;
@@ -2773,6 +3185,8 @@ if (buffer) {
     buffer->type = type;
     buffer->address = address;
     buffer->count = count;
+    buffer->is_22bit = !dmc_is_dmc(q->controller) &&
+                       ((*q->controller->csrs->sel2 & DMP_SEL2_M_22BIT) != 0);
     ASSURE (insqueue (&buffer->hdr, q->hdr.prev)); /* Insert at tail */
     sim_debug(DBG_INF, q->controller->device, "%s%d: Queued %s buffer address=0x%08x count=%d %s\n", q->controller->device->name, q->controller->index, q->name, address, count, controller_queue_state(q->controller));
     }
@@ -2791,10 +3205,20 @@ return ((q->hdr.next == &q->hdr) ? NULL : (BUFFER *)q->hdr.next);
 
 void dmc_queue_control_out(CTLR *controller, uint16 sel6)
 {
+    dmc_queue_control_out_data(controller, *controller->csrs->sel2, *controller->csrs->sel4, sel6, 0);
+}
+
+void dmc_queue_control_out_data(CTLR *controller, uint16 sel2, uint16 sel4, uint16 sel6, uint16 sel10)
+{
 CONTROL_OUT *control = (CONTROL_OUT *)calloc(1, sizeof(*control));
 CONTROL_OUT *last = NULL;
 
+if (!control)
+    return;
+control->sel2 = sel2;
+control->sel4 = sel4;
 control->sel6 = sel6;
+control->sel10 = sel10;
 if (controller->control_out) {
     last = controller->control_out;
     while (last->next)
@@ -2805,15 +3229,422 @@ else
     controller->control_out = control;
 }
 
+void dmv_queue_control_response(CTLR *controller, uint16 sel4, uint16 sel6)
+{
+uint16 station;
+uint16 sel2;
+uint16 response_sel6 = sel6;
+uint16 response_sel10 = 0;
+
+if (controller->device != &dmv_dev)
+    return;
+station = *controller->csrs->sel2 & 0xff00;
+sel2 = station | DMP_C_TYPE_CNTL;
+if (*controller->csrs->sel2 & DMP_SEL2_M_22BIT) {
+    sel2 |= DMP_SEL2_M_22BIT;
+    response_sel6 &= 0x003f;
+    response_sel10 = sel6 & 0x00ff;
+    }
+dmc_queue_control_out_data(controller, sel2, sel4, response_sel6, response_sel10);
+}
+
+/* Queue the DMV11 information response described by Section 3.4.3 of
+   EK-DMV11-TM-001_DMV11_Synchronous_Controller_Technical_Manual_Sep81.pdf,
+   printed page 3-26.  Unlike a control response, this has binary type code
+   010.  Section 3.5 of that manual, also printed page 3-26, specifies that
+   the low-order byte of SEL4 is BSEL4 and the high-order byte is BSEL5.
+   Section 3.2.1 and Figure 3-1, printed pages 3-1 through 3-2, define the
+   byte- and word-addressed CSR interface used here. */
+void dmv_queue_information_response(CTLR *controller, uint16 station,
+                                    uint16 data, uint16 location, t_bool clear)
+{
+uint16 sel2;
+uint16 sel6 = (location & 037) | (clear ? 0100 : 0040);
+uint16 sel10 = 0;
+
+if (controller->device != &dmv_dev)
+    return;
+sel2 = ((station & 0xff) << 8) | DMP_C_TYPE_MODE;
+if (*controller->csrs->sel2 & DMP_SEL2_M_22BIT) {
+    sel2 |= DMP_SEL2_M_22BIT;
+    sel10 = 0;
+    }
+dmc_queue_control_out_data(controller, sel2, data, sel6, sel10);
+}
+
+/* Queue an information response whose BSEL6 low bits are a return key,
+   rather than a TSS/GSS location accompanied by a read flag. */
+static void dmv_queue_information_key_response(CTLR *controller, uint16 station,
+                                               uint16 data, uint16 key)
+{
+uint16 sel2;
+
+if (controller->device != &dmv_dev)
+    return;
+sel2 = ((station & 0xff) << 8) | DMP_C_TYPE_MODE;
+if (*controller->csrs->sel2 & DMP_SEL2_M_22BIT)
+    sel2 |= DMP_SEL2_M_22BIT;
+dmc_queue_control_out_data(controller, sel2, data, key & 037, 0);
+}
+
+static int dmv_find_tss(CTLR *controller, uint16 station)
+{
+int i;
+
+for (i = 0; i < DMV_TSS_COUNT; ++i)
+    if ((controller->dmv_tss_present & (1u << i)) &&
+        (controller->dmv_tss_address[i] == (station & 0xff)))
+        return i;
+return -1;
+}
+
+static int dmv_alloc_tss(CTLR *controller, uint16 station)
+{
+int i;
+
+if ((station == 0) || (dmv_find_tss(controller, station) >= 0))
+    return -1;
+for (i = 0; i < DMV_TSS_COUNT; ++i)
+    if (!(controller->dmv_tss_present & (1u << i))) {
+        controller->dmv_tss_present |= (1u << i);
+        controller->dmv_tss_address[i] = station & 0xff;
+        controller->dmv_tss_state[i] = 0;
+        memset(controller->dmv_tss[i], 0, sizeof(controller->dmv_tss[i]));
+        controller->dmv_tss[i][1] = station & 0xff;
+        /* Table 4-2 defaults.  Paired 8-bit values occupy BSEL4/BSEL5,
+           hence the second value is in the high byte of the word. */
+        controller->dmv_tss[i][030] = 0;
+        controller->dmv_tss[i][031] = 0377;
+        controller->dmv_tss[i][032] = 0100 << 8;
+        controller->dmv_tss[i][033] = 020 << 8;
+        controller->dmv_tss[i][034] = (2 << 8) | 010;
+        controller->dmv_tss[i][035] = 4 << 8;
+        controller->dmv_tss[i][036] = 05670;
+        controller->dmv_tss[i][037] = 013560;
+        return i;
+        }
+return -1;
+}
+
+static void dmv_initialize_status(CTLR *controller)
+{
+memset(controller->dmv_gss, 0, sizeof(controller->dmv_gss));
+memset(controller->dmv_tss, 0, sizeof(controller->dmv_tss));
+memset(controller->dmv_tss_address, 0, sizeof(controller->dmv_tss_address));
+memset(controller->dmv_tss_state, 0, sizeof(controller->dmv_tss_state));
+memset(controller->dmv_common_pool_enabled, 0,
+       sizeof(controller->dmv_common_pool_enabled));
+memset(controller->dmv_common_pool_quota, 0,
+       sizeof(controller->dmv_common_pool_quota));
+memset(controller->dmv_polling_state, 0, sizeof(controller->dmv_polling_state));
+controller->dmv_tss_present = 0;
+
+/* Table 4-3 defaults.  The GSS is created when the first TSS is
+   established, but keeping the default image here makes that creation
+   deterministic and makes reads of the documented parameters useful before
+   protocol traffic has begun. */
+controller->dmv_gss[033] = 010;       /* NUMSYNC, low-speed default */
+controller->dmv_gss[034] = 013560;     /* STREAM TRIB, six seconds */
+controller->dmv_gss[035] = 0310;      /* DELTAT, 200 milliseconds */
+controller->dmv_gss[036] = 017500;    /* DEADT, ten seconds */
+controller->dmv_gss[037] = 0;         /* POLL DELAY */
+}
+
+static t_bool dmv_is_tss_error_counter(uint16 location)
+{
+return (location >= 07) && (location <= 017);
+}
+
+static t_bool dmv_is_gss_error_counter(uint16 location)
+{
+return (location >= 015) && (location <= 017);
+}
+
+static void dmv_queue_procedural_error(CTLR *controller, uint16 code)
+{
+dmv_queue_control_response(controller, 0, code);
+sim_debug(DBG_WRN, controller->device,
+          "%s%d: DMV procedural error %o\n", controller->device->name,
+          controller->index, code);
+}
+
+static t_bool dmv_process_status_command(CTLR *controller, uint16 station,
+                                         uint16 sel6, uint16 data)
+{
+uint16 location = sel6 & 037;
+uint16 access = sel6 & 0340;
+int slot = -1;
+uint16 *word;
+
+if (!access)
+    return FALSE;
+sim_debug(DBG_INF, controller->device,
+          "%s%d: DMV status access station=%u access=%o location=%o data=0x%04x\n",
+          controller->device->name, controller->index, station, access,
+          location, data);
+if ((access != 040) && (access != 0100) && (access != 0200)) {
+    dmv_queue_procedural_error(controller, DMV_ERROR_RESERVED_BITS);
+    return TRUE;
+    }
+
+if (station) {
+    slot = dmv_find_tss(controller, station);
+    if (slot < 0) {
+        dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+        return TRUE;
+        }
+    word = &controller->dmv_tss[slot][location];
+    }
+else
+    word = &controller->dmv_gss[location];
+
+if ((access & 0200) != 0) {          /* write TSS/GSS */
+    if (station ? (location < 030 || location > 037) :
+                 (location < 033 || location > 037)) {
+        dmv_queue_procedural_error(controller, 0132);
+        return TRUE;
+        }
+    *word = data;
+    return TRUE;
+    }
+
+if ((access & 0100) &&
+    !(station ? dmv_is_tss_error_counter(location) :
+               dmv_is_gss_error_counter(location))) {
+    dmv_queue_procedural_error(controller, 0132);
+    return TRUE;
+    }
+
+dmv_queue_information_response(controller, station, *word, location,
+                               (access & 0100) != 0);
+if (access & 0100)
+    *word = 0;
+return TRUE;
+}
+
+static void dmv_write_modem(CTLR *controller, uint16 data)
+{
+int32 set_bits = 0;
+int32 clear_bits = 0;
+
+/* Only the output signals are writable.  CAR/CTS/DSR/RI are modem inputs
+   and are sampled from the TMXR line. */
+sim_debug(DBG_MDM, controller->device,
+          "%s%d: DMV modem write BSEL4=0%o (DTR=%s RTS=%s)\n",
+          controller->device->name, controller->index, data,
+          (data & DMC_SEL4_M_DTR) ? "on" : "off",
+          (data & DMC_SEL4_M_RTS) ? "on" : "off");
+if (data & DMC_SEL4_M_DTR)
+    set_bits |= TMXR_MDM_DTR;
+else
+    clear_bits |= TMXR_MDM_DTR;
+if (data & DMC_SEL4_M_RTS)
+    set_bits |= TMXR_MDM_RTS;
+else
+    clear_bits |= TMXR_MDM_RTS;
+tmxr_set_get_modem_bits(controller->line, set_bits, clear_bits, NULL);
+dmc_get_modem(controller);
+}
+
+/* Queue a global DMV response.  Global responses have no tributary address
+   in BSEL3 and use only the response code in BSEL6 (or BSEL10 in Q22 mode). */
+void dmv_queue_global_response(CTLR *controller, uint16 code)
+{
+uint16 sel2 = DMP_C_TYPE_CNTL;
+uint16 sel6 = code;
+uint16 sel10 = 0;
+
+if (controller->device != &dmv_dev)
+    return;
+if (*controller->csrs->sel2 & DMP_SEL2_M_22BIT) {
+    sel2 |= DMP_SEL2_M_22BIT;
+    sel6 = 0;
+    sel10 = code & 0x00ff;
+    }
+dmc_queue_control_out_data(controller, sel2, 0, sel6, sel10);
+}
+
+/* The DMV reports carrier loss only after carrier has been absent for the
+   documented 1.28-second interval while a receive frame is in progress.
+   A TCP close clears the TMXR receive parser as part of disconnect handling,
+   so dmc_poll_svc samples rxpboffset before polling the line and passes that
+   fact here. */
+void dmv_check_carrier_loss(CTLR *controller, uint8 old_modem, uint8 new_modem,
+                            t_bool receive_in_progress)
+{
+if (controller->device != &dmv_dev)
+    return;
+if (new_modem & DMC_SEL4_M_CAR) {
+    controller->dmv_carrier_loss_pending = FALSE;
+    return;
+    }
+/* A DSR transition is the separate modem-disconnected event.  Do not
+   report carrier loss for the same transition. */
+if ((old_modem & DMC_SEL4_M_DSR) &&
+    !(new_modem & DMC_SEL4_M_DSR)) {
+    controller->dmv_carrier_loss_pending = FALSE;
+    return;
+    }
+if (controller->state != Running) {
+    controller->dmv_carrier_loss_pending = FALSE;
+    return;
+    }
+if (!controller->dmv_carrier_loss_pending) {
+    if (!(old_modem & DMC_SEL4_M_CAR))
+        return;
+    if (!receive_in_progress)
+        return;
+    controller->dmv_carrier_loss_pending = TRUE;
+    controller->dmv_carrier_loss_start = sim_gtime();
+    sim_debug(DBG_MDM, controller->device,
+              "%s%d: DCD=OFF DSR=%s; carrier-loss timer started\n",
+              controller->device->name, controller->index,
+              (new_modem & DMC_SEL4_M_DSR) ? "ON" : "OFF");
+    }
+else if ((sim_gtime() - controller->dmv_carrier_loss_start) >=
+         (1.28 * sim_timer_inst_per_sec())) {
+    dmv_queue_global_response(controller, DMV_RESPONSE_CARRIER_LOSS);
+    controller->dmv_carrier_loss_pending = FALSE;
+    /* Discard any incomplete DDCMP frame and remain in Run.  The manual
+       specifies receiver resynchronization, not a station shutdown. */
+    controller->line->rxpboffset = 0;
+    sim_debug(DBG_WRN, controller->device,
+              "%s%d: carrier loss after 1.28 seconds; receiver resynchronized\n",
+              controller->device->name, controller->index);
+    }
+}
+
+/* DSR must remain off for at least 10 ms before the DMV declares a modem
+   disconnect.  Keep this separate from carrier-loss timing: DSR loss is a
+   global disconnect event, while carrier loss is reported only for an
+   incomplete receive operation after 1.28 seconds. */
+static t_bool dmv_check_dsr_loss(CTLR *controller, uint8 old_modem,
+                                 uint8 new_modem)
+{
+if (controller->device != &dmv_dev)
+    return FALSE;
+if (new_modem & DMC_SEL4_M_DSR) {
+    controller->dmv_dsr_loss_pending = FALSE;
+    controller->dmv_dsr_loss_start = 0;
+    return FALSE;
+    }
+if (!controller->dmv_dsr_loss_pending) {
+    if (!(old_modem & DMC_SEL4_M_DSR))
+        return FALSE;
+    controller->dmv_dsr_loss_pending = TRUE;
+    controller->dmv_dsr_loss_start = sim_gtime();
+    sim_debug(DBG_MDM, controller->device,
+              "%s%d: DSR-loss timer started\n",
+              controller->device->name, controller->index);
+    return TRUE;
+    }
+if ((sim_gtime() - controller->dmv_dsr_loss_start) <
+    (0.010 * sim_timer_inst_per_sec()))
+    return TRUE;
+sim_debug(DBG_MDM, controller->device,
+          "%s%d: DSR loss after %.3f ms; queuing modem disconnect\n",
+          controller->device->name, controller->index,
+          (sim_gtime() - controller->dmv_dsr_loss_start) * 1000.0 /
+          sim_timer_inst_per_sec());
+controller->dmv_dsr_loss_pending = FALSE;
+controller->dmv_dsr_loss_start = 0;
+ddcmp_dispatch(controller, 0);
+return FALSE;
+}
+
+/* CTS failure is a DMV global disconnect response distinct from the Table
+   3-7 BSEL6 system-event codes.  The user guide specifies BSEL6=0304 and
+   BSEL7=0304 (octal), after CTS remains off for 30 seconds +/- 10 ms. */
+static t_bool dmv_check_cts_failure(CTLR *controller, uint8 old_modem,
+                                    uint8 new_modem)
+{
+double elapsed;
+
+(void)old_modem;
+
+if (controller->device != &dmv_dev)
+    return FALSE;
+if (new_modem & DMC_SEL4_M_CTS) {
+    controller->dmv_cts_failure_pending = FALSE;
+    controller->dmv_cts_failure_start = 0;
+    return FALSE;
+    }
+if (!(new_modem & DMC_SEL4_M_RTS) ||
+    !(new_modem & DMC_SEL4_M_DSR) ||
+    controller->link.state != Run) {
+    controller->dmv_cts_failure_pending = FALSE;
+    controller->dmv_cts_failure_start = 0;
+    return FALSE;
+    }
+if (!controller->dmv_cts_failure_pending) {
+    controller->dmv_cts_failure_pending = TRUE;
+    controller->dmv_cts_failure_start = sim_gtime();
+    sim_debug(DBG_MDM, controller->device,
+              "%s%d: CTS-loss timer started (RTS=ON DSR=ON)\n",
+              controller->device->name, controller->index);
+    return TRUE;
+    }
+elapsed = sim_gtime() - controller->dmv_cts_failure_start;
+if (elapsed < (30.0 * sim_timer_inst_per_sec()))
+    return TRUE;
+controller->dmv_cts_failure_pending = FALSE;
+controller->dmv_cts_failure_start = 0;
+ddcmp_ResetVariables(controller);
+/* BSEL6 and BSEL7 both carry octal 304 for the CTS global response. */
+dmc_queue_control_out_data(controller, DMP_C_TYPE_CNTL, 0,
+                           DMV_CTS_FAILURE_CODE |
+                           (DMV_CTS_FAILURE_CODE << 8), 0);
+dmc_clr_modem_dtr(controller);
+sim_debug(DBG_WRN, controller->device,
+          "%s%d: CTS failure after %.3f seconds; BSEL6=0304 BSEL7=0304\n",
+          controller->device->name, controller->index,
+          elapsed / sim_timer_inst_per_sec());
+return FALSE;
+}
+
+/* Queue a DMV procedural response which identifies an affected main-memory
+   buffer.  In 18-bit mode the two high address bits share SEL6 with the
+   low-byte response code.  In 22-bit mode the six high address bits occupy
+   SEL6 and the response code moves to BSEL10 (the low byte of SEL10). */
+void dmv_queue_buffer_error_response(CTLR *controller, uint32 address, uint16 code,
+                                     t_bool is_22bit)
+{
+uint16 command_sel2;
+uint16 sel2;
+uint16 sel6;
+uint16 sel10 = 0;
+
+if (controller->device != &dmv_dev)
+    return;
+
+command_sel2 = *controller->csrs->sel2;
+sel2 = (command_sel2 & 0xff00) | DMP_C_TYPE_CNTL;
+if (is_22bit) {
+    sel2 |= DMP_SEL2_M_22BIT;
+    sel6 = (uint16)((address >> 16) & 0x003f);
+    sel10 = code & 0x00ff;
+    }
+else {
+    sel6 = (uint16)(((address >> 16) & 0x0003) << 14) |
+                   (code & 0x00ff);
+    }
+dmc_queue_control_out_data(controller, sel2, (uint16)(address & 0xffff), sel6, sel10);
+}
+
 /* returns true if some data was received */
 t_bool dmc_buffer_fill_receive_buffers(CTLR *controller)
 {
 int ans = FALSE;
 
 if (controller->state == Running) {
-    BUFFER *buffer = dmc_buffer_queue_head(controller->rcv_queue);
-
-    while (buffer) {
+    /* Keep consuming complete DDCMP frames even when the guest has no
+       receive buffer posted.  ddcmp_GiveBufferToUser() deliberately handles
+       that case by leaving R unchanged and scheduling NAK reason 8.  The old
+       receive-queue guard stopped here instead, leaving the frame in the
+       socket and making the documented no-buffer response unreachable on the
+       normal network path.  Control frames also need to keep flowing while a
+       guest receive queue is temporarily empty. */
+    while (TRUE) {
         ddcmp_tmxr_get_packet_ln (controller->line, (const uint8 **)&controller->link.rcv_pkt, &controller->link.rcv_pkt_size, *controller->corruption_factor);
         if (!controller->link.rcv_pkt)
             break;
@@ -2821,8 +3652,14 @@ if (controller->state == Running) {
         controller->buffers_received_from_net++;
         controller->ddcmp_control_packets_received += (controller->link.rcv_pkt[0] == DDCMP_ENQ) ? 1 : 0;
         ddcmp_dispatch(controller, DDCMP_EVENT_PKT_RCVD);
-        buffer = dmc_buffer_queue_head(controller->rcv_queue);
         }
+    /* Packet dispatch can change the link state without adding a guest
+       transmit request.  In particular, a received NAK advances T and the
+       next zero-event pass must requeue the affected data packet for retry.
+       Do this here so network-driven receives and guest-posted receives use
+       the same follow-up path. */
+    if (ans)
+        ddcmp_dispatch(controller, 0);
     }
 return ans;
 }
@@ -2834,17 +3671,29 @@ uint16 count;
 
 if ((!head) ||
     (controller->transfer_state != Idle) ||
-    (dmc_is_rdyo_set(controller)))
+    (dmc_is_rdyo_set(controller)) ||
+    (dmc_is_rdyi_set(controller)))
     return;
 count = (uint16)head->actual_bytes_transferred;
+/* The guest may queue another input descriptor before this buffer reaches
+   the output side.  Preserve the address/count format belonging to the
+   completed buffer instead of deriving it from the current command CSR. */
+if (!dmc_is_dmc(controller)) {
+    uint16 sel2 = *controller->csrs->sel2;
+    if (head->is_22bit)
+        sel2 |= DMP_SEL2_M_22BIT;
+    else
+        sel2 &= ~DMP_SEL2_M_22BIT;
+    dmc_setreg(controller, 2, sel2, DBG_RGC);
+    }
 switch (head->type) {
     case Receive:
         sim_debug(DBG_INF, controller->device, "%s%d: Starting data output transfer for receive, address=0x%08x, count=%d %s\n", controller->device->name, controller->index, head->address, count, controller_queue_state(controller));
-        dmc_set_type_output(controller, DMC_C_TYPE_RBACC);
+        dmc_set_type_output(controller, dmc_is_dmc(controller) ? DMC_C_TYPE_RBACC : DMP_C_TYPE_RBACC);
         break;
     case TransmitData:
         sim_debug(DBG_INF, controller->device, "%s%d: Starting data output transfer for transmit, address=0x%08x, count=%d %s\n", controller->device->name, controller->index, head->address, count, controller_queue_state(controller));
-        dmc_set_type_output(controller, DMC_C_TYPE_XBACC);
+        dmc_set_type_output(controller, dmc_is_dmc(controller) ? DMC_C_TYPE_XBACC : DMP_C_TYPE_XBACC);
         break;
     default:
         break;
@@ -2865,7 +3714,10 @@ if ((dmc_is_rdyo_set(controller)) ||
 sim_debug(DBG_INF, controller->device, "%s%d: Output transfer completed %s\n", controller->device->name, controller->index, controller_queue_state(controller));
 buffer = (BUFFER *)remqueue (controller->completion_queue->hdr.next);
 ASSURE (insqueue (&buffer->hdr, controller->free_queue->hdr.prev));
-controller->transmit_buffer_output_transfers_completed++;
+if (buffer->type == Receive)
+    controller->receive_buffer_output_transfers_completed++;
+else if (buffer->type == TransmitData)
+    controller->transmit_buffer_output_transfers_completed++;
 controller->transfer_state = Idle;
 dmc_process_command(controller); // check for any other transfers
 }
@@ -2910,12 +3762,25 @@ if (dmc_is_dmc(controller)) {
                     BUFFER *buffer = dmc_buffer_queue_add(controller->xmt_queue, addr, count, TransmitData);
                     int n;
 
+                    if (!buffer)
+                        break;
                     /* construct buffer - leaving room for DDCMP header and CRCs */
                     buffer->transfer_buffer = (uint8 *)realloc (buffer->transfer_buffer, buffer->count + DDCMP_HEADER_SIZE + DDCMP_CRC_SIZE);
                     memset (buffer->transfer_buffer, 0, DDCMP_HEADER_SIZE);
                     n = Map_ReadB (buffer->address, buffer->count, buffer->transfer_buffer + DDCMP_HEADER_SIZE);
+                    sim_debug(DBG_INF, controller->device,
+                              "%s%d: Transmit DMA read address=0x%08x count=%d remaining=%d\n",
+                              controller->device->name, controller->index,
+                              buffer->address, buffer->count, n);
                     if (n > 0) {
                         sim_debug(DBG_WRN, controller->device, "%s%d: DMA error\n", controller->device->name, controller->index);
+                        if (controller->device == &dmv_dev) {
+                            dmv_queue_buffer_error_response(controller,
+                                buffer->address + buffer->count - n,
+                                DMV_RESPONSE_NONEXISTENT_MEMORY,
+                                buffer->is_22bit);
+                            controller->state = Halted;
+                            }
                         }
                     buffer->count += DDCMP_HEADER_SIZE + DDCMP_CRC_SIZE;
                     controller->transmit_buffer_input_transfers_completed++;
@@ -2956,37 +3821,280 @@ if (dmc_is_dmc(controller)) {
     }
 else {  /* DMP */
     if (!dmc_is_rdyi_set(controller)) {
+        uint16 sel2 = *controller->csrs->sel2;
         uint16 sel6 = *controller->csrs->sel6;
+        uint32 addr = dmc_get_addr(controller);
+        uint16 count = dmc_get_count(controller);
+
+        controller->transfer_type = dmc_get_input_transfer_type(controller);
+        dmc_clear_rdyi(controller);
 
         if (controller->transfer_type == DMP_C_TYPE_MODE) {
             uint16 mode = sel6 & DMP_TYPE_INPUT_MASK;
-            const char * duplex = (mode & 1) ? "Full-Duplex" : "Half-Duplex";
-            const char * config;
+            static const char *mode_descriptions[] = {
+                "Half-Duplex Point-to-point",
+                "Full-Duplex Point-to-point",
+                "Half-Duplex Point-to-point",
+                "Full-Duplex Point-to-point",
+                "Half-Duplex Control station",
+                "Full-Duplex Control station",
+                "Half-Duplex Tributary station",
+                "Full-Duplex Tributary station"
+                };
 
-            if (mode & 4)
-                config = "Point-to-point";
-            else
-                config = (mode & 2) ? "Tributary station" : "Control Station";
-
-            sim_debug(DBG_INF, controller->device, "%s%d: Completing Mode input transfer, %s %s\n", controller->device->name, controller->index, duplex, config);
-            }
-        else 
-            if (controller->transfer_type == DMP_C_TYPE_CNTL) {
-                sim_debug(DBG_WRN, controller->device, "%s%d: Control command (not processed yet)\n", controller->device->name, controller->index);
+            if (controller->dmp_mode_set && (controller->dmp_mode != mode)) {
+                dmv_queue_procedural_error(controller, DMV_ERROR_INVALID_MODE);
                 }
-            else 
-                if (controller->transfer_type == DMP_C_TYPE_RBACC) {
-                    sim_debug(DBG_WRN, controller->device, "%s%d: Receive Buffer command (not processed yet)\n", controller->device->name, controller->index);
+            else {
+                controller->dmp_mode = mode;
+                controller->dmp_mode_set = TRUE;
+                sim_debug(DBG_INF, controller->device, "%s%d: Completing Mode input transfer, %s\n", controller->device->name, controller->index, mode_descriptions[mode]);
+                }
+            }
+        else if (controller->transfer_type == DMP_C_TYPE_CNTL) {
+            uint16 key = sel6 & 037;
+            uint16 station = (sel2 >> 8) & 0xff;
+            uint16 reserved = sel6 & 0xcc00;
+            int slot;
+            t_bool control_error = FALSE;
+
+            if (reserved)
+                dmv_queue_procedural_error(controller, DMV_ERROR_RESERVED_BITS);
+            else if ((key != DMP_C_KEY_NOP) && !controller->dmp_mode_set)
+                dmv_queue_procedural_error(controller, DMV_ERROR_NO_MODE);
+            else if (dmv_process_status_command(controller, station, sel6,
+                                                *controller->csrs->sel4))
+                ;
+            else {
+                /* Establishment creates the TSS before the independent
+                   BSEL7 controls are applied; the manual explicitly allows
+                   those controls to accompany request key 001. */
+                if (key == DMP_C_KEY_ESTAB) {
+                    if (!station)
+                        dmv_queue_procedural_error(controller, DMV_ERROR_GLOBAL_REQUIRED);
+                    else if (dmv_find_tss(controller, station) >= 0)
+                        dmv_queue_procedural_error(controller, DMV_ERROR_ALREADY_ESTABLISHED);
+                    else if (dmv_alloc_tss(controller, station) < 0)
+                        dmv_queue_procedural_error(controller, DMV_ERROR_TOO_MANY_TSS);
+                    else {
+                        controller->dmp_tributary_established = TRUE;
+                        sim_debug(DBG_INF, controller->device, "%s%d: Established tributary %d\n", controller->device->name, controller->index, station);
                     }
-                else 
-                    if (controller->transfer_type == DMP_C_TYPE_XBACC) {
-                        sim_debug(DBG_WRN, controller->device, "%s%d: Transmit Buffer command (not processed yet)\n", controller->device->name, controller->index);
+                }
+                /* Apply the independent BSEL7 controls before the request
+                   key.  These controls may legally accompany NOP, ESTAB,
+                   START, or MAINT. */
+                if (sel6 & 00400) {
+                    slot = dmv_find_tss(controller, station);
+                    if ((slot < 0) || !station) {
+                        dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        control_error = TRUE;
                         }
                     else {
-                        sim_debug(DBG_WRN, controller->device, "%s%d: Unrecognised command code 0x%X\n", controller->device->name, controller->index, controller->transfer_type);
+                        uint16 delta = *controller->csrs->sel4 & 0377;
+                        if (delta == 0377) {
+                            controller->dmv_common_pool_quota[slot] = 0377;
+                            controller->dmv_common_pool_enabled[slot] = TRUE;
+                            }
+                        else if ((controller->dmv_common_pool_quota[slot] + delta) >= 0377) {
+                            controller->dmv_common_pool_quota[slot] = 0376;
+                            dmv_queue_procedural_error(controller, DMV_ERROR_QUOTA);
+                            control_error = TRUE;
                         }
+                        else {
+                            controller->dmv_common_pool_quota[slot] += delta;
+                            controller->dmv_common_pool_enabled[slot] = TRUE;
+                        }
+                        }
+                    }
+                if (sel6 & 01000) {
+                    slot = dmv_find_tss(controller, station);
+                    if ((slot < 0) || !station) {
+                        dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        control_error = TRUE;
+                        }
+                    else {
+                        controller->dmv_common_pool_enabled[slot] = FALSE;
+                        controller->dmv_common_pool_quota[slot] = 0;
+                        }
+                    }
+                if (sel6 & 010000) {
+                    slot = dmv_find_tss(controller, station);
+                    if (slot < 0) {
+                        dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        control_error = TRUE;
+                        }
+                    else
+                        controller->dmv_polling_state[slot] = 0;
+                    }
+                if (sel6 & 020000) {
+                    slot = dmv_find_tss(controller, station);
+                    if (slot < 0) {
+                        dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        control_error = TRUE;
+                        }
+                    else
+                        controller->dmv_polling_state[slot] = *controller->csrs->sel4 & 3;
+                    }
+
+                if (!control_error)
+                    switch (key) {
+                    case DMP_C_KEY_NOP:
+                        break;
+                    case DMP_C_KEY_ESTAB:
+                        /* The request was handled before the BSEL7 controls. */
+                        break;
+                    case DMP_C_KEY_DELETE:
+                        slot = dmv_find_tss(controller, station);
+                        if (!station)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_GLOBAL_REQUIRED);
+                        else if (slot < 0)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        else if (controller->dmv_tss_state[slot] != 0)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_UNHALTED);
+                        else {
+                            controller->dmv_tss_present &= ~(1u << slot);
+                            controller->dmv_common_pool_enabled[slot] = FALSE;
+                            controller->dmv_common_pool_quota[slot] = 0;
+                            controller->dmp_tributary_established = controller->dmv_tss_present != 0;
+                        }
+                        break;
+                    case DMP_C_KEY_START:
+                        slot = dmv_find_tss(controller, station);
+                        if (!station)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_GLOBAL_REQUIRED);
+                        else if (slot < 0)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        else if (controller->dmv_tss_state[slot] != 0)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_UNHALTED);
+                        else {
+                            controller->dmv_tss_state[slot] = 1;
+                            controller->state = Running;
+                            dmc_set_modem_dtr(controller);
+                            ddcmp_dispatch(controller, 0);
+                        }
+                        break;
+                    case DMP_C_KEY_MAINT:
+                        slot = dmv_find_tss(controller, station);
+                        if (!station)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_GLOBAL_REQUIRED);
+                        else if (slot < 0)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        else if (controller->dmv_tss_state[slot] != 0)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_UNHALTED);
+                        else {
+                            controller->dmv_tss_state[slot] = 2;
+                            controller->state = Running;
+                            dmc_set_modem_dtr(controller);
+                            ddcmp_dispatch(controller, DDCMP_EVENT_MAINTMODE);
+                        }
+                        break;
+                    case DMP_C_KEY_HALT:
+                        if (!station) {
+                            for (slot = 0; slot < DMV_TSS_COUNT; ++slot)
+                                if ((controller->dmv_tss_present & (1u << slot)) &&
+                                    controller->dmv_common_pool_enabled[slot])
+                                    break;
+                            if (slot < DMV_TSS_COUNT)
+                                dmv_queue_procedural_error(controller, DMV_ERROR_COMMON_POOL_IN_USE);
+                            else
+                                dmv_queue_information_key_response(controller, 0, 0, 020);
+                        }
+                        else if ((slot = dmv_find_tss(controller, station)) < 0)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_UNESTABLISHED);
+                        else {
+                            controller->dmv_tss_state[slot] = 0;
+                            controller->state = Halted;
+                            ddcmp_dispatch(controller, 0);
+                            dmc_clr_modem_dtr(controller);
+                            dmc_queue_control_out(controller, DMC_SEL6_M_HALTCOMP);
+                        }
+                        break;
+                    case DMP_C_KEY_MODEM:
+                        if (station)
+                            dmv_queue_procedural_error(controller, DMV_ERROR_GLOBAL_REQUIRED);
+                        else
+                            dmv_queue_information_key_response(controller, 0,
+                                                                dmc_get_modem(controller),
+                                                                010);
+                        break;
+                    case DMP_C_KEY_MODEM_WRITE:
+                        dmv_write_modem(controller, *controller->csrs->sel4);
+                        break;
+                    default:
+                        dmv_queue_procedural_error(controller, DMV_ERROR_INVALID_KEY);
+                        break;
+                    }
+                }
+            }
+        else if (controller->transfer_type == DMP_C_TYPE_RBACC) {
+            if (count == 0) {
+                sim_debug(DBG_WRN, controller->device, "%s%d: Receive Buffer command has zero count\n", controller->device->name, controller->index);
+                dmv_queue_procedural_error(controller, DMV_ERROR_ZERO_COUNT);
+                }
+            else if (dmc_buffer_queue_add(controller->rcv_queue, addr, count, Receive)) {
+                dmc_buffer_fill_receive_buffers(controller);
+                controller->receive_buffer_input_transfers_completed++;
+                ddcmp_dispatch(controller, 0);
+                }
+            }
+        else if (controller->transfer_type == DMP_C_TYPE_XBACC) {
+            BUFFER *buffer = NULL;
+
+            if (count == 0) {
+                sim_debug(DBG_WRN, controller->device, "%s%d: Transmit Buffer command has zero count\n", controller->device->name, controller->index);
+                dmv_queue_procedural_error(controller, DMV_ERROR_ZERO_COUNT);
+                }
+            else {
+                buffer = dmc_buffer_queue_add(controller->xmt_queue, addr, count, TransmitData);
+                if (buffer) {
+                    int n;
+
+                    /* Leave room for the DDCMP header and CRCs. */
+                    buffer->transfer_buffer = (uint8 *)realloc(buffer->transfer_buffer, buffer->count + DDCMP_HEADER_SIZE + DDCMP_CRC_SIZE);
+                    memset(buffer->transfer_buffer, 0, DDCMP_HEADER_SIZE);
+                    n = Map_ReadB(buffer->address, buffer->count, buffer->transfer_buffer + DDCMP_HEADER_SIZE);
+                    sim_debug(DBG_INF, controller->device,
+                              "%s%d: Transmit DMA read address=0x%08x count=%d remaining=%d\n",
+                              controller->device->name, controller->index,
+                              buffer->address, buffer->count, n);
+                    if (n > 0) {
+                        sim_debug(DBG_WRN, controller->device, "%s%d: DMA error reading transmit buffer\n", controller->device->name, controller->index);
+                        if (controller->device == &dmv_dev) {
+                            dmv_queue_buffer_error_response(controller,
+                                buffer->address + buffer->count - n,
+                                DMV_RESPONSE_NONEXISTENT_MEMORY,
+                                buffer->is_22bit);
+                            controller->state = Halted;
+                            buffer = (BUFFER *)remqueue(&buffer->hdr);
+                            }
+                        free(buffer->transfer_buffer);
+                        buffer->transfer_buffer = NULL;
+                        buffer->count = 0;
+                        ASSURE(insqueue(&buffer->hdr, controller->free_queue->hdr.prev));
+                        buffer = NULL;
+                        }
+                    else {
+                        buffer->count += DDCMP_HEADER_SIZE + DDCMP_CRC_SIZE;
+                        controller->transmit_buffer_input_transfers_completed++;
+                        }
+                    }
+                if (buffer) {
+                    if (controller->state != Running) {
+                        controller->state = Running;
+                        dmc_set_modem_dtr(controller);
+                        }
+                    ddcmp_dispatch(controller, 0);
+                    }
+                }
+            }
+        else {
+            sim_debug(DBG_WRN, controller->device, "%s%d: Unrecognised command code 0x%X\n", controller->device->name, controller->index, controller->transfer_type);
+            dmv_queue_procedural_error(controller, DMV_ERROR_INVALID_TYPE);
+            }
 
         controller->transfer_state = Idle;
+        dmc_process_command(controller);
         }
     }
 }
@@ -3054,6 +4162,7 @@ sim_activate_after (controller->device->units+(controller->device->numunits-1), 
 void ddcmp_StopTimer              (CTLR *controller)
 {
 controller->link.TimerRunning = FALSE;
+controller->link.TimeRemaining = 0;
 }
 void ddcmp_ResetVariables         (CTLR *controller)
 {
@@ -3068,6 +4177,8 @@ controller->link.X = 0;
 controller->link.SACK = FALSE;
 controller->link.SNAK = FALSE;
 controller->link.SREP = FALSE;
+controller->link.TimerRunning = FALSE;
+controller->link.TimeRemaining = 0;
 controller->link.state = Halt;
 controller->link.nak_reason = 0;
 /* Move any ack wait packets back to the transmit queue so they get 
@@ -3099,6 +4210,8 @@ void ddcmp_SendStrt               (CTLR *controller)
 {
 BUFFER *buffer = dmc_buffer_allocate(controller);
 
+if (!buffer)
+    return;
 buffer->transfer_buffer = (uint8 *)malloc (DDCMP_HEADER_SIZE);
 buffer->count = DDCMP_HEADER_SIZE;
 ddcmp_build_start_packet (buffer->transfer_buffer);
@@ -3109,6 +4222,8 @@ void ddcmp_SendStack              (CTLR *controller)
 {
 BUFFER *buffer = dmc_buffer_allocate(controller);
 
+if (!buffer)
+    return;
 buffer->transfer_buffer = (uint8 *)malloc (DDCMP_HEADER_SIZE);
 buffer->count = DDCMP_HEADER_SIZE;
 ddcmp_build_start_ack_packet (buffer->transfer_buffer);
@@ -3119,6 +4234,8 @@ void ddcmp_SendAck                (CTLR *controller)
 {
 BUFFER *buffer = dmc_buffer_allocate(controller);
 
+if (!buffer)
+    return;
 buffer->transfer_buffer = (uint8 *)malloc (DDCMP_HEADER_SIZE);
 buffer->count = DDCMP_HEADER_SIZE;
 ddcmp_build_ack_packet (buffer->transfer_buffer, controller->link.R, DDCMP_FLAG_SELECT);
@@ -3129,6 +4246,8 @@ void ddcmp_SendNak                (CTLR *controller)
 {
 BUFFER *buffer = dmc_buffer_allocate(controller);
 
+if (!buffer)
+    return;
 buffer->transfer_buffer = (uint8 *)malloc (DDCMP_HEADER_SIZE);
 buffer->count = DDCMP_HEADER_SIZE;
 ddcmp_build_nak_packet (buffer->transfer_buffer, controller->link.nak_reason, controller->link.R, DDCMP_FLAG_SELECT);
@@ -3139,6 +4258,8 @@ void ddcmp_SendRep                (CTLR *controller)
 {
 BUFFER *buffer = dmc_buffer_allocate(controller);
 
+if (!buffer)
+    return;
 buffer->transfer_buffer = (uint8 *)malloc (DDCMP_HEADER_SIZE);
 buffer->count = DDCMP_HEADER_SIZE;
 ddcmp_build_rep_packet (buffer->transfer_buffer, controller->link.N, DDCMP_FLAG_SELECT);
@@ -3241,7 +4362,9 @@ void ddcmp_Ignore                 (CTLR *controller)
 }
 void ddcmp_GiveBufferToUser       (CTLR *controller)
 {
-BUFFER *buffer = (BUFFER *)remqueue (controller->rcv_queue->hdr.next);
+BUFFER *buffer = dmc_buffer_queue_head(controller->rcv_queue);
+uint16 payload_count;
+int32 remaining;
 
 if (!buffer) {
     ddcmp_SetSNAK (controller);
@@ -3249,8 +4372,33 @@ if (!buffer) {
     return;
     }
 
-buffer->actual_bytes_transferred = controller->link.rcv_pkt_size - (DDCMP_HEADER_SIZE + DDCMP_CRC_SIZE);
-Map_WriteB(buffer->address, buffer->actual_bytes_transferred, controller->link.rcv_pkt + DDCMP_HEADER_SIZE);
+payload_count = controller->link.rcv_pkt_size - (DDCMP_HEADER_SIZE + DDCMP_CRC_SIZE);
+if (payload_count > buffer->count) {
+    /* Keep the buffer queued so it can be reused after the peer retries. */
+    dmv_queue_buffer_error_response(controller, buffer->address,
+                                    DMV_RESPONSE_BUFFER_SMALL,
+                                    buffer->is_22bit);
+    ddcmp_SetSNAK (controller);
+    controller->link.nak_reason = 16;   /* buffer too small */
+    sim_debug(DBG_WRN, controller->device, "%s%d: Receive buffer too small: buffer=%u packet=%u; sending NAK reason 16\n", controller->device->name, controller->index, buffer->count, payload_count);
+    return;
+    }
+
+buffer = (BUFFER *)remqueue (controller->rcv_queue->hdr.next);
+buffer->actual_bytes_transferred = payload_count;
+remaining = Map_WriteB(buffer->address, buffer->actual_bytes_transferred, controller->link.rcv_pkt + DDCMP_HEADER_SIZE);
+sim_debug(DBG_INF, controller->device,
+          "%s%d: Receive DMA write address=0x%08x count=%d remaining=%d\n",
+          controller->device->name, controller->index, buffer->address,
+          buffer->actual_bytes_transferred, remaining);
+if ((remaining > 0) && (controller->device == &dmv_dev)) {
+    dmv_queue_buffer_error_response(controller,
+        buffer->address + buffer->actual_bytes_transferred - remaining,
+        DMV_RESPONSE_NONEXISTENT_MEMORY, buffer->is_22bit);
+    controller->state = Halted;
+    ASSURE (insqueue (&buffer->hdr, controller->free_queue->hdr.prev));
+    return;
+    }
 ASSURE (insqueue (&buffer->hdr, controller->completion_queue->hdr.prev));     /* Insert at tail */
 ddcmp_IncrementR (controller);
 ddcmp_SetSACK (controller);
@@ -3286,9 +4434,16 @@ for (i=0; i < controller->ack_wait_queue->count; ++i) {
     ASSURE (insqueue (&buffer->hdr, controller->xmt_queue->hdr.prev)); /* Insert at tail */
     break;
     }
+dmc_ddcmp_start_transmitter (controller);
 }
 void ddcmp_NotifyDisconnect       (CTLR *controller)
 {
+if (controller->device == &dmv_dev) {
+    dmv_queue_global_response(controller, DMV_RESPONSE_MODEM_DISCONNECTED);
+    controller->dmv_dsr_loss_pending = FALSE;
+    dmc_clr_modem_dtr(controller);
+    return;
+    }
 dmc_queue_control_out(controller, DMC_SEL6_M_DISCONN);
 }
 void ddcmp_NotifyStartRcvd        (CTLR *controller)
@@ -3522,7 +4677,12 @@ return (*controller->modem & DMC_SEL4_M_CAR);
 }
 t_bool ddcmp_LineDisconnected     (CTLR *controller)
 {
-return (!(*controller->modem & DMC_SEL4_M_CAR));
+/* DMV treats DSR loss as modem disconnect (0304).  Carrier loss while a
+   receive frame is active is handled by dmv_check_carrier_loss and must not
+   take the link through the generic disconnect rule. */
+return (controller->device == &dmv_dev) ?
+       !(*controller->modem & DMC_SEL4_M_DSR) :
+       !(*controller->modem & DMC_SEL4_M_CAR);
 }
 t_bool ddcmp_DataMessageSent      (CTLR *controller)
 {
@@ -3577,8 +4737,11 @@ for (table=DDCMP_TABLE; table->Conditions[0] != NULL; ++table) {
             ++action;
             }
         if (table->NewState != controller->link.state) {
+            DDCMP_LinkState old_state = controller->link.state;
             sim_debug (DBG_INF, controller->device, "%s%d: ddcmp_dispatch(%X) - state changing from %s to %s\n", controller->device->name, controller->index, EventMask, states[controller->link.state], states[table->NewState]);
             controller->link.state = table->NewState;
+            if ((old_state != Run) && (controller->link.state == Run))
+                dmv_queue_control_response(controller, 0, 024);
             }
         }
     }
@@ -3606,6 +4769,12 @@ if ((controller->link.xmt_buffer) ||        /* if Already Transmitting */
     (!buffer) ||                            /*    or nothing pending */
     (!controller->line->conn))              /*    or not connected */
     return;                                 /* Do nothing */
+/* DMV modem control interlocks transmission on CTS.  Socket lines normally
+   synthesize CTS when RTS is asserted; the DMV CTS fixture and real modem
+   control lines can leave it absent while the request remains queued. */
+if ((controller->device == &dmv_dev) &&
+    !(dmc_get_modem(controller) & DMC_SEL4_M_CTS))
+    return;
 while (buffer) {
     if (buffer->transfer_buffer[0] == 0)
         return;
@@ -3674,15 +4843,28 @@ if (dmc_is_dmc (controller) &&
 
 void dmc_process_immediate(CTLR *controller)
 {
+if (!dmc_is_dmc(controller) && (controller->device == &dmv_dev) &&
+    ((*controller->csrs->sel0 & (DMV_SEL0_M_MNT_REQ | DMV_SEL0_M_MNT_EN)) ==
+     (DMV_SEL0_M_MNT_REQ | DMV_SEL0_M_MNT_EN))) {
+    dmv_process_maintenance_entry(controller);
+    return;
+    }
 if (dmc_is_master_clear_set(controller)) {
     dmc_process_master_clear(controller);
     return;
     }
+if (!dmc_is_dmc(controller) && (controller->device == &dmv_dev))
+    dmv_process_maintenance_entry(controller);
+else
     dmc_check_romi(controller);             /* Do any needed immediate actions */
 }
 
 void dmc_process_command(CTLR *controller)
 {
+if (controller->dmv_maintenance_mode) {
+    dmv_process_maintenance_command(controller);
+    return;
+    }
 if (controller->transfer_state == InputTransfer) {
     dmc_process_input_transfer_completion(controller);
     return;
@@ -3696,7 +4878,7 @@ if (controller->transfer_state == OutputControl) {
     return;
     }
 /* transfer_state Idle */
-if (dmc_is_rqi_set(controller)) {
+if (!dmc_is_rdyo_set(controller) && dmc_is_rqi_set(controller)) {
     dmc_start_input_transfer(controller);
     return;
     }
@@ -3733,6 +4915,8 @@ t_stat dmc_wr(int32 data, int32 PA, int32 access)
 {
 CTLR *controller = dmc_get_controller_from_address(PA);
 int reg = PA & ((UNIBUS) ? 07 : 017);
+uint16 old_sel0 = *controller->csrs->sel0;
+uint16 old_sel2 = *controller->csrs->sel2;
 uint16 oldValue = dmc_getreg(controller, PA, 0);
 
 if (access == WRITE) {
@@ -3760,6 +4944,8 @@ else {
 
     dmc_setreg(controller, PA, (oldValue & ~mask) | (data & mask), DBG_REG);
     }
+
+dmc_update_csr_interrupts(controller, old_sel0, old_sel2);
 
 if (dmc_getsel(reg) == 0)    /* writes to SEL0 may need immediate action */
     dmc_process_immediate(controller);      /* Do any needed immediate actions */
@@ -3880,6 +5066,9 @@ if (0 == dmc_units[0].flags) {       /* First Time Initializations */
         controller->state = Uninitialised;
         controller->transfer_state = Idle;
         controller->control_out = NULL;
+        controller->dmp_mode = 0;
+        controller->dmp_mode_set = FALSE;
+        controller->dmp_tributary_established = FALSE;
         *controller->modem = 0;
 #if defined (VM_PDP10)
         controller->dev_type = DMR;
@@ -3904,6 +5093,9 @@ if (0 == dmc_units[0].flags) {       /* First Time Initializations */
         controller->state = Uninitialised;
         controller->transfer_state = Idle;
         controller->control_out = NULL;
+        controller->dmp_mode = 0;
+        controller->dmp_mode_set = FALSE;
+        controller->dmp_tributary_established = FALSE;
         *controller->modem = 0;
         dmp_dev.units[i] = dmc_unit_template;
         controller->unit->ctlr = (void *)controller;
@@ -3977,6 +5169,7 @@ t_stat dmc_attach (UNIT *uptr, CONST char *cptr)
 {
 DEVICE *dptr = (UNIBUS) ? ((&dmc_dev == find_dev_from_unit(uptr)) ? &dmc_dev : &dmp_dev) : &dmv_dev;
 int32 dmc = (int32)(uptr-dptr->units);
+
 TMXR *mp = (dptr == &dmc_dev) ? &dmc_desc : &dmp_desc;
 t_stat ans = SCPE_OK;
 char *peer = ((dptr == &dmc_dev)? &dmc_peer[dmc][0] : &dmp_peer[dmc][0]);
