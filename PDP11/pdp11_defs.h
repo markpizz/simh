@@ -648,8 +648,10 @@ typedef t_uint64 t_int_reqs;                            /* large enough bitwise 
 #define INT_V_UCB       25
 #define INT_V_CH        26
 #define INT_V_NG        27
-#define INT_V_DHRX      28
+#define INT_V_DHRX      28      /* DH11 */
 #define INT_V_DHTX      29
+#define INT_V_VHURX     28      /* DHU11 - Never used at the same time as DH11 */
+#define INT_V_VHUTX     29 
 #define INT_V_RHD       30
 #define INT_V_RR        31
 
@@ -727,6 +729,8 @@ typedef t_uint64 t_int_reqs;                            /* large enough bitwise 
 #define INT_LPT         (VEC_INT_BIT << INT_V_LPT)
 #define INT_VHRX        (VEC_INT_BIT << INT_V_VHRX)
 #define INT_VHTX        (VEC_INT_BIT << INT_V_VHTX)
+#define INT_VHURX       (VEC_INT_BIT << INT_V_VHURX)
+#define INT_VHUTX       (VEC_INT_BIT << INT_V_VHUTX)
 #define INT_CD          (VEC_INT_BIT << INT_V_CD)
 #define INT_DLI         (VEC_INT_BIT << INT_V_DLI)
 #define INT_DLO         (VEC_INT_BIT << INT_V_DLO)
@@ -798,6 +802,8 @@ typedef t_uint64 t_int_reqs;                            /* large enough bitwise 
 #define IPL_NG          5
 #define IPL_DHRX        5
 #define IPL_DHTX        5
+#define IPL_VHURX       5
+#define IPL_VHUTX       5
 #define IPL_PTR         4
 #define IPL_PTP         4
 #define IPL_TTI         4

@@ -70,7 +70,8 @@ CSR 17 760 440 (float)
 
 Vector: 300 (float)
 
-Priority:   BR4
+Priority:   BR4   (DHV11)
+            BR5   (DHU11)
 
 Rank:       32
 
@@ -79,11 +80,34 @@ Rank:       32
 
 #if defined (VM_VAX)
 #include "vax_defs.h"
+#if defined (VAX_780) || defined (VAX_750) || defined (VAX_730) || defined (VAX_820) || defined (VAX_860)
+/* Unibus only systems can't have a DHV11 */
+#define IPL_VHRX    0
+#define IPL_VHTX    0
+#define INT_VHRX    0
+#define INT_VHTX    0
+#define INT_V_VHRX  0
+#else 
+/* Qbus only systems can't have a DHU11 */
+#define IPL_VHURX   0
+#define IPL_VHUTX   0
+#define INT_VHURX   0
+#define INT_VHUTX   0
+#define INT_V_VHURX 0
 #endif
+#endif /* defined (VM_VAX) */
 
 #if defined (VM_PDP11)
 #include "pdp11_defs.h"
 #endif
+
+/* DHU11 and DHV11 interrupt on different levels */
+#undef SET_INT
+#define SET_INT(dv)     (UNIBUS ? (int_req[IPL_VHU##dv] = int_req[IPL_VHU##dv] | (INT_VHU##dv)) : (int_req[IPL_VH##dv] = int_req[IPL_VH##dv] | (INT_VH##dv)))
+#undef CLR_INT
+#define CLR_INT(dv)     (UNIBUS ? (int_req[IPL_VHU##dv] = int_req[IPL_VHU##dv] & ~(INT_VHU##dv)) : (int_req[IPL_VH##dv] = int_req[IPL_VH##dv] & ~(INT_VH##dv)))
+
+
 
 #include "sim_tmxr.h"
 
@@ -148,6 +172,7 @@ BITFIELD vh_csr_bits[] = {
   BIT(TX_ACTION),                           /* Transmit Action */
   ENDBITS
 };
+
 
 
 /* Receive Buffer (RBUF) */
@@ -635,15 +660,15 @@ static void vh_clr_rxint (  int32   vh  )
 {
     vh_rxi &= ~(1 << vh);
     if (vh_rxi == 0)
-        CLR_INT (VHRX);
+        CLR_INT (RX);
     else
-        SET_INT (VHRX);
+        SET_INT (RX);
 }
 
 static void vh_set_rxint (  int32   vh  )
 {
     vh_rxi |= (1 << vh);
-    SET_INT (VHRX);
+    SET_INT (RX);
 }
 
 /* RX interrupt ack. (bus cycle) */
@@ -666,16 +691,16 @@ static void vh_clr_txint (  int32   vh  )
 {
     vh_txi &= ~(1 << vh);
     if (vh_txi == 0)
-        CLR_INT (VHTX);
+        CLR_INT (TX);
     else
-        SET_INT (VHTX);
+        SET_INT (TX);
 }
 
 static void vh_set_txint (  int32   vh  )
 {
     sim_debug(DBG_INT, &vh_dev, "vh_set_txint(vh=%d)\n", vh);
     vh_txi |= (1 << vh);
-    SET_INT (VHTX);
+    SET_INT (TX);
 }
 
 /* TX interrupt ack. (bus cycle) */
@@ -1722,8 +1747,9 @@ static t_stat vh_reset (    DEVICE  *dptr   )
         }
     }
     vh_rxi = vh_txi = 0;
-    CLR_INT (VHRX);
-    CLR_INT (VHTX);
+    CLR_INT (RX);
+    CLR_INT (TX);
+    vh_dib.vloc = UNIBUS ? IVCL (VHURX) : IVCL (VHRX);
     vh_dib.lnt = (vh_desc.lines / VH_LINES) * IOLN_VH;      /* set length */
     return (auto_config (dptr->name, (dptr->flags & DEV_DIS) ? 0 : vh_desc.lines/VH_LINES));
 }

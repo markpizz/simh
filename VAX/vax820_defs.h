@@ -333,15 +333,15 @@ typedef struct {
 #define INT_V_RK        13
 #define INT_V_CH        14
 #define INT_V_UW        15
+#define INT_V_VHURX     16
+#define INT_V_VHUTX     17
 
 #define INT_V_LPT       0                               /* BR4 */
 #define INT_V_PTR       1
 #define INT_V_PTP       2
 //#define XXXXXXXX        3                             /* Former CR */
-#define INT_V_VHRX      4
-#define INT_V_VHTX      5
-#define INT_V_TDRX      6
-#define INT_V_TDTX      7
+#define INT_V_TDRX      4
+#define INT_V_TDTX      5
 
 #define INT_DTA         (1u << INT_V_DTA)
 #define INT_CR          (1u << INT_V_CR)
@@ -355,8 +355,8 @@ typedef struct {
 #define INT_RY          (1u << INT_V_RY)
 #define INT_XU          (1u << INT_V_XU)
 #define INT_LPT         (1u << INT_V_LPT)
-#define INT_VHRX        (1u << INT_V_VHRX)
-#define INT_VHTX        (1u << INT_V_VHTX)
+#define INT_VHURX       (1u << INT_V_VHURX)
+#define INT_VHUTX       (1u << INT_V_VHUTX)
 #define INT_PTR         (1u << INT_V_PTR)
 #define INT_PTP         (1u << INT_V_PTP)
 #define INT_DMCRX       (1u << INT_V_DMCRX)
@@ -384,8 +384,8 @@ typedef struct {
 #define IPL_LPT         (0x14 - IPL_HMIN)
 #define IPL_PTR         (0x14 - IPL_HMIN)
 #define IPL_PTP         (0x14 - IPL_HMIN)
-#define IPL_VHRX        (0x14 - IPL_HMIN)
-#define IPL_VHTX        (0x14 - IPL_HMIN)
+#define IPL_VHURX       (0x15 - IPL_HMIN)
+#define IPL_VHUTX       (0x15 - IPL_HMIN)
 #define IPL_DMCRX       (0x15 - IPL_HMIN)
 #define IPL_DMCTX       (0x15 - IPL_HMIN)
 #define IPL_DUPRX       (0x15 - IPL_HMIN)
